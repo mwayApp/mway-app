@@ -7120,9 +7120,13 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
   const T=useT();
   const [editingQ,setEditingQ]=useState(null);
   const [viewingResp,setViewingResp]=useState(null);
-  const [respFilter,setRespFilter]=useState("all"); // all | known | anonymous
+  const [respFilter,setRespFilter]=useState("all"); // all | known | anonymous | invited | walkin
+  const [filterCity,setFilterCity]=useState("");
+  const [filterGender,setFilterGender]=useState("");
+  const [respView,setRespView]=useState("aggregate"); // aggregate | individual
   const [copied,setCopied]=useState(false);
   const [showTemplate,setShowTemplate]=useState(false);
+  const [showExportChoice,setShowExportChoice]=useState(false);
 
   const projectQs=surveyQuestions.filter(q=>q.project_id===project.id).sort((a,b)=>(a.order_num||0)-(b.order_num||0));
   const projectResps=surveyResponses.filter(r=>r.project_id===project.id);
@@ -7229,11 +7233,46 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
     }catch(e){ alert("فشل: "+(e.message||e)); }
   };
 
+  const genSurveyReport=(includeAttendance)=>{
+    if(!projectQs.length){ alert("لا توجد أسئلة"); return; }
+    if(!filteredResps.length){ alert("لا توجد ردود بهذي الفلاتر"); return; }
+    const html=buildSurveyReportHTML(project,projectQs,filteredResps,{
+      filterLabel:filterLabel,
+      audience:audience,
+      invitations:invitations,
+      includeAttendance:!!includeAttendance
+    });
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([html],{type:"text/html"}));
+    a.download=(includeAttendance?"تقرير-موحّد-":"تقرير-استبيان-")+project.name+"-"+today()+".html";
+    a.click();
+    setShowExportChoice(false);
+  };
+
+  const isInvitedResp=(r)=>r.audience_id&&invitations.some(i=>i.project_id===project.id&&i.audience_id===r.audience_id);
   const filteredResps=projectResps.filter(r=>{
-    if(respFilter==="known") return !r.is_anonymous;
-    if(respFilter==="anonymous") return r.is_anonymous;
+    if(respFilter==="known"&&r.is_anonymous) return false;
+    if(respFilter==="anonymous"&&!r.is_anonymous) return false;
+    if(respFilter==="invited"){ if(r.is_anonymous) return false; if(!isInvitedResp(r)) return false; }
+    if(respFilter==="walkin"){ if(r.is_anonymous) return false; if(isInvitedResp(r)) return false; }
+    if(filterCity||filterGender){
+      const person=r.audience_id?audience.find(a=>a.id===r.audience_id):null;
+      if(filterCity&&(!person||person.city!==filterCity)) return false;
+      if(filterGender&&(!person||person.gender!==filterGender)) return false;
+    }
     return true;
   });
+  // Cities & genders present among respondents (for filter chips)
+  const citiesInResp=Array.from(new Set(projectResps.map(r=>r.audience_id?audience.find(a=>a.id===r.audience_id)?.city:null).filter(Boolean))).sort();
+  const gendersInResp=Array.from(new Set(projectResps.map(r=>r.audience_id?audience.find(a=>a.id===r.audience_id)?.gender:null).filter(Boolean)));
+
+  const filterLabel=(function(){
+    const parts=[];
+    if(respFilter!=="all") parts.push({all:"الكل",known:"معروفون",anonymous:"مجهولون",invited:"مدعوّون",walkin:"خارج القائمة"}[respFilter]);
+    if(filterCity) parts.push(filterCity);
+    if(filterGender) parts.push(filterGender==="male"?"ذكور":"إناث");
+    return parts.length?parts.join(" · "):"كل الردود";
+  })();
 
   const invitedList=invitations.filter(i=>i.project_id===project.id);
   const respondentIdSet=new Set(knownResps.map(r=>r.audience_id).filter(Boolean));
@@ -7317,43 +7356,108 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
         </div>
       )}
 
-      {/* Responses list */}
+      {/* Responses section */}
       {projectResps.length>0&&(
         <>
           <Row style={{justifyContent:"space-between",marginBottom:10,alignItems:"center"}}>
             <div style={{fontSize:14,fontWeight:800,color:T.text}}>📊 الردود ({projectResps.length})</div>
+            <Btn variant="ghost" sm onClick={()=>setShowExportChoice(true)} style={{padding:"6px 10px"}}>
+              <Ic d={I.download} s={13}/> تصدير
+            </Btn>
           </Row>
-          <Row style={{gap:6,marginBottom:10,flexWrap:"wrap"}}>
-            {[["all","الكل",projectResps.length],["known","معروفون",knownResps.length],["anonymous","مجهولون",anonResps.length]].map(([v,l,n])=>(
-              <button key={v} className="press" onClick={()=>setRespFilter(v)}
-                style={{background:respFilter===v?T.accent+"22":"transparent",border:`1px solid ${respFilter===v?T.accent:T.border}`,color:respFilter===v?T.accent:T.muted,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans','Tajawal',sans-serif"}}>
-                {l} ({n})
-              </button>
+
+          {/* View toggle */}
+          <Row style={{gap:0,marginBottom:10,background:T.card2,borderRadius:10,padding:3}}>
+            {[["aggregate","📈 مجمّعة"],["individual","👁 فردية"]].map(([id,lbl])=>(
+              <button key={id} className="press" onClick={()=>setRespView(id)}
+                style={{flex:1,padding:"7px 0",borderRadius:8,border:"none",cursor:"pointer",
+                fontFamily:"Tajawal,sans-serif",fontSize:12,fontWeight:700,
+                background:respView===id?T.card:"transparent",color:respView===id?T.accent:T.muted}}>{lbl}</button>
             ))}
           </Row>
-          {filteredResps.map((r,idx)=>{
-            const person=r.audience_id?audience.find(a=>a.id===r.audience_id):null;
-            const wasInvited=r.audience_id&&invitations.some(i=>i.project_id===project.id&&i.audience_id===r.audience_id);
-            const dt=r.submitted_at?new Date(r.submitted_at).toLocaleString("ar-SA",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"";
-            return (
-              <div key={r.id} className="press card-hover" onClick={()=>setViewingResp(r)}
-                style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 12px",marginBottom:6,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:34,height:34,borderRadius:"50%",background:r.is_anonymous?T.muted+"44":wasInvited?T.accent+"33":"#f59fc4"+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
-                  {r.is_anonymous?"⚫":wasInvited?"🟢":"🟡"}
-                </div>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {r.is_anonymous?"مستفتٍ مجهول #"+(idx+1):(r.respondent_name||person?.name||"—")}
+
+          {/* Filters */}
+          <div style={{marginBottom:12}}>
+            <Row style={{gap:5,marginBottom:5,flexWrap:"wrap"}}>
+              {[["all","الكل",projectResps.length],["invited","🟢 مدعوّون",invitedResps.length],["walkin","🟡 خارج",externalResps.length],["anonymous","⚫ مجهولون",anonResps.length]].map(([v,l,n])=>(
+                <button key={v} className="press" onClick={()=>setRespFilter(v)}
+                  style={{background:respFilter===v?T.accent+"22":"transparent",border:`1px solid ${respFilter===v?T.accent:T.border}`,color:respFilter===v?T.accent:T.muted,borderRadius:7,padding:"4px 9px",fontSize:10,fontWeight:700,cursor:"pointer"}}>{l} ({n})</button>
+              ))}
+            </Row>
+            {(citiesInResp.length>1||gendersInResp.length>1)&&(
+              <Row style={{gap:5,flexWrap:"wrap"}}>
+                {gendersInResp.length>1&&gendersInResp.map(g=>(
+                  <button key={g} className="press" onClick={()=>setFilterGender(filterGender===g?"":g)}
+                    style={{background:filterGender===g?T.accent+"22":"transparent",border:`1px solid ${filterGender===g?T.accent:T.border}`,color:filterGender===g?T.accent:T.muted,borderRadius:7,padding:"3px 8px",fontSize:10,fontWeight:600,cursor:"pointer"}}>{g==="male"?"♂":"♀"}</button>
+                ))}
+                {citiesInResp.slice(0,8).map(c=>(
+                  <button key={c} className="press" onClick={()=>setFilterCity(filterCity===c?"":c)}
+                    style={{background:filterCity===c?T.accent+"22":"transparent",border:`1px solid ${filterCity===c?T.accent:T.border}`,color:filterCity===c?T.accent:T.muted,borderRadius:7,padding:"3px 8px",fontSize:10,fontWeight:600,cursor:"pointer"}}>{c}</button>
+                ))}
+                {(filterGender||filterCity)&&(
+                  <button className="press" onClick={()=>{setFilterGender("");setFilterCity("");}}
+                    style={{background:"transparent",border:"none",color:T.muted,fontSize:10,cursor:"pointer",fontWeight:600}}>✕ مسح</button>
+                )}
+              </Row>
+            )}
+            {filteredResps.length!==projectResps.length&&(
+              <div style={{fontSize:10,color:T.muted,marginTop:6,fontFamily:"'DM Mono',monospace"}}>{filteredResps.length} من {projectResps.length} رد</div>
+            )}
+          </div>
+
+          {filteredResps.length===0?(
+            <Card style={{textAlign:"center",padding:24}}>
+              <div style={{fontSize:12,color:T.muted}}>لا توجد ردود بهذي الفلاتر</div>
+            </Card>
+          ):respView==="aggregate"?(
+            <div>
+              {projectQs.map((q,idx)=>(
+                <QuestionStats key={q.id} q={q} idx={idx} responses={filteredResps}/>
+              ))}
+            </div>
+          ):(
+            filteredResps.map((r,idx)=>{
+              const person=r.audience_id?audience.find(a=>a.id===r.audience_id):null;
+              const wasInvited=isInvitedResp(r);
+              const dt=r.submitted_at?new Date(r.submitted_at).toLocaleString("ar-SA",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"";
+              return (
+                <div key={r.id} className="press card-hover" onClick={()=>setViewingResp(r)}
+                  style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 12px",marginBottom:6,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:34,height:34,borderRadius:"50%",background:r.is_anonymous?T.muted+"44":wasInvited?T.accent+"33":"#f59fc4"+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                    {r.is_anonymous?"⚫":wasInvited?"🟢":"🟡"}
                   </div>
-                  <div style={{fontSize:10,color:T.muted}}>
-                    {r.is_anonymous?"بدون بيانات":wasInvited?"مدعو":"خارج القائمة"} · {dt}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {r.is_anonymous?"مستفتٍ مجهول #"+(idx+1):(r.respondent_name||person?.name||"—")}
+                    </div>
+                    <div style={{fontSize:10,color:T.muted}}>
+                      {r.is_anonymous?"بدون بيانات":wasInvited?"مدعو":"خارج القائمة"} · {dt}
+                    </div>
                   </div>
+                  <Ic d={I.chevron} s={14} c={T.muted}/>
                 </div>
-                <Ic d={I.chevron} s={14} c={T.muted}/>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </>
+      )}
+
+      {showExportChoice&&(
+        <Modal title="📥 تصدير التقرير" onClose={()=>setShowExportChoice(false)}>
+          <div style={{fontSize:12,color:T.muted,marginBottom:14}}>الفلتر الحالي: <b style={{color:T.text}}>{filterLabel}</b> ({filteredResps.length} رد)</div>
+          <div className="press card-hover" onClick={()=>genSurveyReport(false)}
+            style={{background:T.card2,border:`1.5px solid ${T.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10,cursor:"pointer"}}>
+            <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:4}}>📊 تقرير الاستبيان</div>
+            <div style={{fontSize:11,color:T.muted}}>تحليلات مفصّلة + رسوم بيانية + الردود النصية</div>
+          </div>
+          {project.hostingEnabled&&(
+            <div className="press card-hover" onClick={()=>genSurveyReport(true)}
+              style={{background:T.accent+"12",border:`1.5px solid ${T.accent}66`,borderRadius:12,padding:"14px 16px",cursor:"pointer"}}>
+              <div style={{fontSize:14,fontWeight:800,color:T.accent,marginBottom:4}}>🎪 + 📊 تقرير موحّد</div>
+              <div style={{fontSize:11,color:T.muted}}>حضور الفعالية + تحليل الاستبيان في ملف واحد</div>
+            </div>
+          )}
+        </Modal>
       )}
 
       {editingQ&&<SurveyQuestionModal
@@ -7512,6 +7616,382 @@ function ResponseDetailModal({response,questions,audience,invitations,onClose}){
       </div>
     </Modal>
   );
+}
+
+/* ══════════════════════════════════════
+   SURVEY ANALYTICS — stats calc + rendering
+══════════════════════════════════════ */
+function computeStats(q,responses){
+  var answered=responses.filter(function(r){
+    var v=(r.answers||{})[q.id];
+    return v!==undefined&&v!==null&&v!=="";
+  });
+  var total=answered.length;
+  var out={total:total,q_type:q.q_type};
+  if(!total) return out;
+  if(q.q_type==="rating"){
+    var vals=answered.map(function(r){return Number(r.answers[q.id]);}).filter(function(v){return v>=1&&v<=5;});
+    out.values=vals;
+    out.avg=vals.length?vals.reduce(function(a,b){return a+b;},0)/vals.length:0;
+    out.dist=[1,2,3,4,5].map(function(n){return vals.filter(function(v){return v===n;}).length;});
+  } else if(q.q_type==="scale"){
+    var vals10=answered.map(function(r){return Number(r.answers[q.id]);}).filter(function(v){return v>=1&&v<=10;});
+    out.values=vals10;
+    out.avg=vals10.length?vals10.reduce(function(a,b){return a+b;},0)/vals10.length:0;
+    out.dist=[1,2,3,4,5,6,7,8,9,10].map(function(n){return vals10.filter(function(v){return v===n;}).length;});
+    // NPS: promoters 9-10, detractors 1-6
+    var pro=vals10.filter(function(v){return v>=9;}).length;
+    var det=vals10.filter(function(v){return v<=6;}).length;
+    out.nps=vals10.length?Math.round((pro-det)*100/vals10.length):0;
+  } else if(q.q_type==="yes_no"){
+    var yes=answered.filter(function(r){return r.answers[q.id]==="yes";}).length;
+    var no=answered.filter(function(r){return r.answers[q.id]==="no";}).length;
+    out.yes=yes; out.no=no;
+    out.yesPct=Math.round(yes*100/total); out.noPct=Math.round(no*100/total);
+  } else if(q.q_type==="choice"){
+    var opts=q.options||[];
+    var pairs=opts.map(function(o){
+      var c=answered.filter(function(r){return r.answers[q.id]===o;}).length;
+      return {option:o,count:c,pct:Math.round(c*100/total)};
+    }).sort(function(a,b){return b.count-a.count;});
+    out.pairs=pairs;
+  } else if(q.q_type==="text"){
+    out.texts=answered.map(function(r){return {text:String(r.answers[q.id]||"").trim(), respondent:r};}).filter(function(x){return x.text;});
+  }
+  return out;
+}
+
+function QuestionStats({q,idx,responses}){
+  const T=useT();
+  const s=computeStats(q,responses);
+  const meta=Q_TYPE_META[q.q_type]||{icon:"❓",label:q.q_type};
+
+  const shell={background:T.card,border:"1.5px solid "+T.border,borderRadius:14,padding:"14px 16px",marginBottom:10};
+  const header=(
+    <>
+      <div style={{fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.16em",marginBottom:4}}>
+        {("0"+(idx+1)).slice(-2)} · {meta.icon} {meta.label}
+      </div>
+      <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:10,lineHeight:1.4}}>{q.question}</div>
+      <div style={{fontSize:10,color:T.muted,marginBottom:12,fontFamily:"'DM Mono',monospace"}}>{s.total} إجابة</div>
+    </>
+  );
+
+  if(!s.total) return <div style={shell}>{header}<div style={{color:T.muted,fontSize:12,fontStyle:"italic"}}>لم يجب أحد</div></div>;
+
+  if(q.q_type==="rating"){
+    return (
+      <div style={shell}>{header}
+        <Row style={{alignItems:"baseline",marginBottom:10,gap:8}}>
+          <div style={{fontSize:32,fontWeight:900,color:"#f5c518",lineHeight:1}}>{s.avg.toFixed(1)}</div>
+          <div style={{fontSize:14,color:T.muted,fontWeight:600}}>/ 5</div>
+          <div style={{flex:1,textAlign:"left",color:"#f5c518",fontSize:18}}>{"★".repeat(Math.round(s.avg))}{"☆".repeat(5-Math.round(s.avg))}</div>
+        </Row>
+        {[5,4,3,2,1].map(function(n){
+          const cnt=s.dist[n-1];
+          const pct=s.total?Math.round(cnt*100/s.total):0;
+          return (
+            <Row key={n} style={{gap:8,marginBottom:4,alignItems:"center",fontSize:11}}>
+              <div style={{width:24,color:"#f5c518",fontWeight:700}}>{n}★</div>
+              <div style={{flex:1,height:8,background:T.card2,borderRadius:4,overflow:"hidden"}}>
+                <div style={{width:pct+"%",height:"100%",background:"#f5c518",transition:"width .5s"}}/>
+              </div>
+              <div style={{width:60,textAlign:"left",color:T.muted,fontFamily:"'DM Mono',monospace"}}>{pct}% ({cnt})</div>
+            </Row>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if(q.q_type==="scale"){
+    var maxDist=Math.max.apply(null,s.dist);
+    return (
+      <div style={shell}>{header}
+        <Row style={{alignItems:"baseline",marginBottom:10,gap:8}}>
+          <div style={{fontSize:32,fontWeight:900,color:T.accent,lineHeight:1}}>{s.avg.toFixed(1)}</div>
+          <div style={{fontSize:14,color:T.muted,fontWeight:600}}>/ 10</div>
+          <div style={{flex:1,textAlign:"left"}}>
+            <div style={{fontSize:11,color:T.muted}}>NPS</div>
+            <div style={{fontSize:18,fontWeight:900,color:s.nps>0?T.accent:T.warnText}}>{s.nps>0?"+":""}{s.nps}</div>
+          </div>
+        </Row>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(10,1fr)",gap:3,alignItems:"end",height:60}}>
+          {s.dist.map(function(cnt,i){
+            const h=maxDist?Math.round(cnt*100/maxDist):0;
+            return (
+              <div key={i} title={cnt+" رد"} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+                <div style={{width:"100%",height:h+"%",minHeight:cnt?4:0,background:T.accent,borderRadius:"3px 3px 0 0"}}/>
+              </div>
+            );
+          })}
+        </div>
+        <Row style={{marginTop:4,fontSize:9,color:T.muted,fontFamily:"'DM Mono',monospace"}}>
+          <span>1</span>{[2,3,4,5,6,7,8,9].map(function(n){return <span key={n} style={{flex:1,textAlign:"center"}}>{n}</span>;})}<span>10</span>
+        </Row>
+      </div>
+    );
+  }
+
+  if(q.q_type==="yes_no"){
+    return (
+      <div style={shell}>{header}
+        <Row style={{gap:8,marginBottom:8}}>
+          <div style={{flex:s.yesPct||1,background:"#4CAF50",height:34,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:13,transition:"flex 0.4s"}}>
+            👍 {s.yesPct}% ({s.yes})
+          </div>
+          <div style={{flex:s.noPct||1,background:"#E57373",height:34,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:13,transition:"flex 0.4s"}}>
+            👎 {s.noPct}% ({s.no})
+          </div>
+        </Row>
+      </div>
+    );
+  }
+
+  if(q.q_type==="choice"){
+    return (
+      <div style={shell}>{header}
+        {s.pairs.map(function(p,i){
+          const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":" ";
+          return (
+            <div key={i} style={{marginBottom:8}}>
+              <Row style={{justifyContent:"space-between",marginBottom:3,fontSize:12}}>
+                <span style={{color:T.text,fontWeight:700}}>{medal} {p.option}</span>
+                <span style={{color:T.muted,fontFamily:"'DM Mono',monospace"}}>{p.pct}% ({p.count})</span>
+              </Row>
+              <div style={{height:10,background:T.card2,borderRadius:5,overflow:"hidden"}}>
+                <div style={{width:p.pct+"%",height:"100%",background:i===0?T.accent:T.accent+"88",transition:"width .5s"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // text
+  return (
+    <div style={shell}>{header}
+      {s.texts.map(function(t,i){
+        return (
+          <div key={i} style={{background:T.card2,borderRadius:8,padding:"9px 12px",marginBottom:5,fontSize:12,color:T.text,lineHeight:1.6}} dir="auto">
+            <span style={{color:T.muted,fontFamily:"'DM Mono',monospace",fontSize:10,marginLeft:6}}>#{i+1}</span>
+            "{t.text}"
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   SURVEY REPORT — rich HTML export with inline SVG charts
+══════════════════════════════════════ */
+function buildSurveyReportHTML(project,questions,responses,opts){
+  var FC=MWAY_EXPORT.dark;
+  var bg=FC.bg, card=FC.card, card2=FC.card2, border=FC.border;
+  var text=FC.text, muted=FC.muted, accent=FC.accent;
+  var headerBg=FC.headerBg, headerText=FC.headerText;
+  var star="#f5c518";
+  var green="#4CAF50", red="#E57373";
+  var cat=EVENT_CATEGORIES.find(function(c){return c.id===project.eventCategory;});
+  var filterLabel=opts.filterLabel||"كل الردود";
+  var audience=opts.audience||[];
+  var invitations=opts.invitations||[];
+
+  function pctBar(pct,color){
+    color=color||accent;
+    return '<div style="height:10px;background:'+card2+';border-radius:5px;overflow:hidden;">'+
+      '<div style="width:'+pct+'%;height:100%;background:'+color+';"></div></div>';
+  }
+
+  function renderRating(s){
+    var rows='';
+    for(var n=5;n>=1;n--){
+      var cnt=s.dist[n-1];
+      var pct=s.total?Math.round(cnt*100/s.total):0;
+      rows+='<tr>'+
+        '<td style="padding:4px 0;width:36px;color:'+star+';font-weight:700;">'+n+'★</td>'+
+        '<td style="padding:4px 8px;">'+pctBar(pct,star)+'</td>'+
+        '<td style="padding:4px 0;width:80px;text-align:left;color:'+muted+';font-family:\'DM Mono\',monospace;font-size:11px;">'+pct+'% ('+cnt+')</td>'+
+        '</tr>';
+    }
+    return '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">'+
+      '<div style="font-size:38px;font-weight:900;color:'+star+';line-height:1;">'+s.avg.toFixed(1)+'</div>'+
+      '<div style="font-size:14px;color:'+muted+';">/ 5</div>'+
+      '<div style="flex:1;text-align:left;color:'+star+';font-size:20px;">'+"★".repeat(Math.round(s.avg))+"☆".repeat(5-Math.round(s.avg))+'</div>'+
+      '</div>'+
+      '<table style="width:100%;border-collapse:collapse;">'+rows+'</table>';
+  }
+
+  function renderScale(s){
+    var maxDist=Math.max.apply(null,s.dist)||1;
+    var bars='';
+    for(var i=0;i<10;i++){
+      var cnt=s.dist[i];
+      var h=Math.round(cnt*100/maxDist);
+      bars+='<div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:80px;">'+
+        '<div style="font-size:9px;color:'+muted+';font-family:\'DM Mono\',monospace;margin-bottom:3px;">'+(cnt||"")+'</div>'+
+        '<div style="width:100%;height:'+h+'%;min-height:'+(cnt?4:0)+'px;background:'+accent+';border-radius:3px 3px 0 0;"></div>'+
+        '<div style="font-size:10px;color:'+muted+';margin-top:4px;font-family:\'DM Mono\',monospace;">'+(i+1)+'</div>'+
+        '</div>';
+    }
+    var npsColor=s.nps>=50?green:s.nps>=0?accent:red;
+    return '<div style="display:flex;align-items:baseline;gap:16px;margin-bottom:14px;flex-wrap:wrap;">'+
+      '<div><div style="font-size:38px;font-weight:900;color:'+accent+';line-height:1;">'+s.avg.toFixed(1)+'</div>'+
+      '<div style="font-size:11px;color:'+muted+';margin-top:2px;">متوسط / 10</div></div>'+
+      '<div><div style="font-size:28px;font-weight:900;color:'+npsColor+';line-height:1;">'+(s.nps>0?"+":"")+s.nps+'</div>'+
+      '<div style="font-size:11px;color:'+muted+';margin-top:2px;">NPS Score</div></div>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(10,1fr);gap:4px;">'+bars+'</div>';
+  }
+
+  function renderYesNo(s){
+    // SVG donut chart
+    var yesFrac=s.total?s.yes/s.total:0;
+    var C=2*Math.PI*40; // circumference
+    var yesLen=(C*yesFrac).toFixed(2);
+    var noLen=(C-yesLen).toFixed(2);
+    return '<div style="display:flex;gap:20px;align-items:center;">'+
+      '<svg viewBox="0 0 100 100" width="110" height="110" style="flex-shrink:0;">'+
+        '<circle cx="50" cy="50" r="40" fill="none" stroke="'+card2+'" stroke-width="14"/>'+
+        '<circle cx="50" cy="50" r="40" fill="none" stroke="'+green+'" stroke-width="14" stroke-dasharray="'+yesLen+' '+noLen+'" transform="rotate(-90 50 50)"/>'+
+        '<text x="50" y="52" text-anchor="middle" font-size="18" font-weight="900" fill="'+text+'" font-family="DM Sans,sans-serif">'+s.yesPct+'%</text>'+
+        '<text x="50" y="66" text-anchor="middle" font-size="8" fill="'+muted+'" font-family="DM Mono,monospace">نعم</text>'+
+      '</svg>'+
+      '<div style="flex:1;">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;color:'+text+';font-weight:700;">'+
+          '<span style="display:inline-block;width:14px;height:14px;background:'+green+';border-radius:3px;"></span>'+
+          '👍 نعم — '+s.yesPct+'% ('+s.yes+')</div>'+
+        '<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:'+text+';font-weight:700;">'+
+          '<span style="display:inline-block;width:14px;height:14px;background:'+red+';border-radius:3px;"></span>'+
+          '👎 لا — '+s.noPct+'% ('+s.no+')</div>'+
+      '</div></div>';
+  }
+
+  function renderChoice(s){
+    // Horizontal bars + inline SVG pie
+    var C=2*Math.PI*40;
+    var colors=[accent,green,"#7986CB","#FFB74D","#BA68C8","#4DB6AC","#F06292","#A1887F"];
+    var offset=0;
+    var pieSegments=s.pairs.map(function(p,i){
+      var frac=s.total?p.count/s.total:0;
+      var len=(C*frac).toFixed(2);
+      var seg='<circle cx="50" cy="50" r="40" fill="none" stroke="'+colors[i%colors.length]+'" stroke-width="14" stroke-dasharray="'+len+' '+(C-len)+'" stroke-dashoffset="'+(-offset)+'" transform="rotate(-90 50 50)"/>';
+      offset+=Number(len);
+      return seg;
+    }).join('');
+    var rows=s.pairs.map(function(p,i){
+      var medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":"•";
+      return '<div style="margin-bottom:8px;">'+
+        '<div style="display:flex;justify-content:space-between;margin-bottom:3px;font-size:12px;">'+
+          '<span style="color:'+text+';font-weight:700;">'+
+            '<span style="display:inline-block;width:10px;height:10px;background:'+colors[i%colors.length]+';border-radius:2px;margin-left:6px;vertical-align:middle;"></span>'+
+            medal+' '+escapeHtml(p.option)+'</span>'+
+          '<span style="color:'+muted+';font-family:\'DM Mono\',monospace;">'+p.pct+'% ('+p.count+')</span></div>'+
+        pctBar(p.pct,colors[i%colors.length])+'</div>';
+    }).join('');
+    return '<div style="display:flex;gap:16px;align-items:center;">'+
+      '<svg viewBox="0 0 100 100" width="110" height="110" style="flex-shrink:0;">'+
+        '<circle cx="50" cy="50" r="40" fill="none" stroke="'+card2+'" stroke-width="14"/>'+
+        pieSegments+
+      '</svg>'+
+      '<div style="flex:1;">'+rows+'</div></div>';
+  }
+
+  function renderText(s){
+    return s.texts.map(function(t,i){
+      return '<div style="background:'+card2+';border-radius:8px;padding:10px 12px;margin-bottom:6px;font-size:12px;color:'+text+';line-height:1.6;" dir="auto">'+
+        '<span style="color:'+muted+';font-family:\'DM Mono\',monospace;font-size:10px;margin-left:8px;">#'+(i+1)+'</span>'+
+        '"'+escapeHtml(t.text)+'"</div>';
+    }).join('');
+  }
+
+  var questionsHTML=questions.map(function(q,idx){
+    var s=computeStats(q,responses);
+    var meta=Q_TYPE_META[q.q_type]||{icon:"❓",label:q.q_type};
+    var body='';
+    if(!s.total) body='<div style="color:'+muted+';font-style:italic;font-size:12px;">لم يجب أحد على هذا السؤال</div>';
+    else if(q.q_type==="rating") body=renderRating(s);
+    else if(q.q_type==="scale") body=renderScale(s);
+    else if(q.q_type==="yes_no") body=renderYesNo(s);
+    else if(q.q_type==="choice") body=renderChoice(s);
+    else if(q.q_type==="text") body=renderText(s);
+    return '<div style="background:'+card+';border:1.5px solid '+border+';border-radius:16px;padding:18px 20px;margin-bottom:14px;page-break-inside:avoid;">'+
+      '<div style="font-size:10px;color:'+muted+';font-family:\'DM Mono\',monospace;letter-spacing:0.16em;margin-bottom:4px;">'+
+        ('0'+(idx+1)).slice(-2)+' · '+meta.icon+' '+meta.label+'</div>'+
+      '<div style="font-size:15px;font-weight:800;color:'+text+';margin-bottom:6px;line-height:1.5;">'+escapeHtml(q.question)+'</div>'+
+      '<div style="font-size:10px;color:'+muted+';margin-bottom:14px;font-family:\'DM Mono\',monospace;">'+s.total+' إجابة</div>'+
+      body+
+    '</div>';
+  }).join('');
+
+  // Attendance section (if merged report)
+  var attendanceSection='';
+  if(opts.includeAttendance&&project.hostingEnabled){
+    var projInv=invitations.filter(function(i){return i.project_id===project.id;});
+    var attended=projInv.filter(function(i){return i.attended;});
+    var pct=projInv.length?Math.round(attended.length*100/projInv.length):0;
+    attendanceSection='<div style="background:'+card+';border:1.5px solid '+border+';border-radius:16px;padding:18px 20px;margin-bottom:14px;">'+
+      '<div style="font-size:14px;font-weight:800;color:'+text+';margin-bottom:10px;">🎪 ملخص حضور الفعالية</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">'+
+      '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:900;color:'+text+';">'+projInv.length+'</div><div style="font-size:10px;color:'+muted+';">مدعوون</div></div>'+
+      '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:900;color:'+accent+';">'+attended.length+'</div><div style="font-size:10px;color:'+muted+';">حضروا</div></div>'+
+      '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:22px;font-weight:900;color:'+muted+';">'+pct+'%</div><div style="font-size:10px;color:'+muted+';">نسبة الحضور</div></div>'+
+      '</div></div>';
+  }
+
+  // Overall dashboard (top stats)
+  var respondentTypes=responses.reduce(function(acc,r){
+    if(r.is_anonymous) acc.anon++;
+    else if(r.audience_id&&invitations.some(function(i){return i.project_id===project.id&&i.audience_id===r.audience_id;})) acc.invited++;
+    else acc.walkin++;
+    return acc;
+  },{invited:0,walkin:0,anon:0});
+
+  var dashboard='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">'+
+    '<div style="background:'+card+';border:1.5px solid '+border+';border-radius:14px;padding:14px;text-align:center;">'+
+      '<div style="font-size:26px;font-weight:900;color:'+text+';">'+responses.length+'</div>'+
+      '<div style="font-size:10px;color:'+muted+';margin-top:4px;">إجمالي الردود</div></div>'+
+    '<div style="background:'+card+';border:1.5px solid '+border+';border-radius:14px;padding:14px;text-align:center;">'+
+      '<div style="font-size:26px;font-weight:900;color:'+green+';">'+respondentTypes.invited+'</div>'+
+      '<div style="font-size:10px;color:'+muted+';margin-top:4px;">🟢 مدعوون</div></div>'+
+    '<div style="background:'+card+';border:1.5px solid '+border+';border-radius:14px;padding:14px;text-align:center;">'+
+      '<div style="font-size:26px;font-weight:900;color:'+accent+';">'+respondentTypes.walkin+'</div>'+
+      '<div style="font-size:10px;color:'+muted+';margin-top:4px;">🟡 walk-ins</div></div>'+
+    '<div style="background:'+card+';border:1.5px solid '+border+';border-radius:14px;padding:14px;text-align:center;">'+
+      '<div style="font-size:26px;font-weight:900;color:'+muted+';">'+respondentTypes.anon+'</div>'+
+      '<div style="font-size:10px;color:'+muted+';margin-top:4px;">⚫ مجهولون</div></div>'+
+    '</div>';
+
+  var titleLabel=opts.includeAttendance?"تقرير موحّد — حضور + استبيان":"تقرير الاستبيان";
+
+  return '<!DOCTYPE html><html dir="rtl" lang="ar"><head>'+
+    '<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>'+
+    '<title>'+escapeHtml(titleLabel)+' — '+escapeHtml(project.name)+'</title>'+
+    '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+    '<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">'+
+    '<style>html,body{background:'+bg+';margin:0;padding:0;font-family:\'Tajawal\',sans-serif;color:'+text+';direction:rtl;}[dir="ltr"]{unicode-bidi:isolate;}@media print{body{padding:20px !important;}}</style>'+
+    '</head><body style="padding:28px 24px;background:'+bg+';">'+
+    // Header
+    '<div style="background:'+headerBg+';color:'+headerText+';border-radius:20px;padding:22px 26px;margin-bottom:20px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">'+
+        '<div><div style="font-size:11px;letter-spacing:0.2em;opacity:0.75;font-family:\'DM Mono\',monospace;text-transform:uppercase;margin-bottom:6px;">Survey Analytics</div>'+
+        '<div style="font-size:22px;font-weight:900;">📊 '+escapeHtml(titleLabel)+'</div>'+
+        '<div style="font-size:13px;margin-top:4px;opacity:0.85;">'+escapeHtml(project.name)+(cat?" · "+cat.e+" "+escapeHtml(cat.l):"")+'</div></div>'+
+        '<div style="text-align:left;"><div style="font-size:30px;font-weight:900;line-height:1;">'+responses.length+'</div>'+
+        '<div style="font-size:11px;opacity:0.85;margin-top:4px;font-family:\'DM Mono\',monospace;">ردود</div></div>'+
+      '</div>'+
+      '<div style="font-size:11px;margin-top:12px;opacity:0.8;font-family:\'DM Mono\',monospace;">فلتر: '+escapeHtml(filterLabel)+'</div>'+
+    '</div>'+
+    dashboard+
+    attendanceSection+
+    questionsHTML+
+    // Footer
+    '<div style="text-align:center;margin-top:24px;padding-top:16px;border-top:1px solid '+border+';font-size:10px;color:'+muted+';font-family:\'DM Mono\',monospace;letter-spacing:0.14em;">'+
+      'Generated by m-way app · '+new Date().toLocaleDateString("ar-SA",{year:"numeric",month:"long",day:"numeric"})+
+    '</div>'+
+    '</body></html>';
 }
 
 /* ══════════════════════════════════════
