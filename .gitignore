@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env / secrets — never commit these
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+vapid-private.txt
+service-role-key.txt
+
+# Local backups / drafts
+*-start.html
+*-backup.html
+*.bak
+
+# Node (if we ever add tooling)
+node_modules/
+dist/
+.vercel/

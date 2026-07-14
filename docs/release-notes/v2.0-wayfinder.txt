@@ -1,0 +1,201 @@
+═══════════════════════════════════════════════════════════════════
+  m-way app  —  Version 2.0  "Wayfinder"  🧭
+═══════════════════════════════════════════════════════════════════
+
+  Released:    6 Jun 2026
+  Build size:  ~340 KB  (single-file HTML)
+  Codename:    Wayfinder 🧭
+
+  "Because every change in this release is about navigation,
+   search, and reordering — guiding the user to anything they need."
+
+
+───────────────────────────────────────────────────────────────────
+  ✨  NEW FEATURES
+───────────────────────────────────────────────────────────────────
+
+🔍  TWO-TIER SEARCH SYSTEM
+   • Project search  —  new 4th tab inside each project page,
+     searches expenses, team members, activity log, custody
+     requests, and project meta. (Order: المصروفات → الفريق →
+     السجل → البحث)
+   • Global search   —  new 🔍 icon on the Home top bar (next
+     to bell & todos). Opens a full modal searching across the
+     whole app: projects, expenses, store names, vendors,
+     quotations, invoices, team members, todos.
+   • Results grouped by entity type with count per group.
+   • Matching substring highlighted in gold.
+   • Direct navigation: tap a vendor result → opens the
+     vendor's edit modal directly. Tap a quotation → opens
+     the quotation editor. Etc.
+
+🔄  DRAG-TO-REORDER EXPENSES
+   • Long-press (~400 ms) on any expense card inside a project
+     enters drag mode (haptic vibrate on mobile + lift + scale).
+   • Drag up or down; other items shift to make room.
+   • Drop commits the new order to Supabase and shows toast
+     "تم الترتيب ✓".
+   • Inner buttons (edit, paid toggle, delete) won't trigger
+     drag — only the card body.
+   • New order syncs to:
+       –  Project page (director)
+       –  Member's expense list (member apps)
+       –  All exports (genReport, exportProjectInvoice, etc.)
+
+🎨  m-way APP BRAND IDENTITY
+   • The m-way signature logo (custom SVG) is now embedded in:
+       –  Login screen (centered, large)
+       –  Home header (small, above the greeting)
+       –  Settings footer
+       –  Header of ALL six export documents (color shifts
+          with the export theme)
+       –  Browser favicon (gold tinted)
+   • App renamed from "Art D Majd — Pilot 4" to "m-way app"
+     in titles, exports, and metadata.
+
+
+───────────────────────────────────────────────────────────────────
+  🐛  BUG FIXES
+───────────────────────────────────────────────────────────────────
+
+CRITICAL  —  Member-uploaded receipts now save properly
+   Before:  When a member added an expense with a receipt
+            photo, the photo would upload but the
+            receipt_url field was never written to the
+            database (saved as NULL). The director could
+            not view the receipt — appeared as if it was
+            never uploaded.
+
+   Cause:   The payload in MemberApp.addExpense was missing
+            the receipt_name and receipt_url fields.
+
+   Fix:     Added both fields to the payload. Going forward,
+            every member upload saves correctly and appears
+            for the director immediately.
+
+   Note:    Old receipts from before this fix (e.g. Bader's
+            4 entries in Sure studio) cannot be recovered
+            from the database. Members can re-edit those
+            expenses to re-attach photos.
+
+OTHER HTML EXPORT FIXES
+   •  Fixed "sar sar" duplication in QuotationExport
+      (fmt() already appends " sar")
+   •  Fixed invoice column alignment — removed phantom
+      <th>#</th> that made columns off by one
+   •  Fixed bullets in Arabic notes appearing on the LEFT
+      side instead of the right (added dir="auto")
+   •  Fixed RTL/LTR text scramble in Payment Terms, IBAN,
+      and brand text (wrapped LTR English in dir="ltr"
+      with unicode-bidi: isolate)
+   •  Fixed mobile text cut off at edges (added viewport
+      meta + responsive padding 24px → 40px)
+   •  Fixed trailing white space on the last PDF page
+      (added html { background } to fill empty area)
+   •  Fixed Account/IBAN/Payment Terms blocks rendering
+      side-by-side instead of stacked (removed accidental
+      display:inline-block from [dir="ltr"] rule)
+
+
+───────────────────────────────────────────────────────────────────
+  🎨  UX IMPROVEMENTS
+───────────────────────────────────────────────────────────────────
+
+   •  Toast confirmation after every drag-reorder
+      ("تم الترتيب ✓")
+   •  Friendly empty states in search:
+        "ابدأ بالكتابة 🔍"  /  "لا توجد نتائج 🤷"
+   •  dir="auto" on every notes container — paragraphs
+      pick their own direction based on first strong char
+   •  Live brand identity preview in every export — logo
+      and "m-way app" footer always visible to the client
+
+
+───────────────────────────────────────────────────────────────────
+  🛠  TECHNICAL CHANGES
+───────────────────────────────────────────────────────────────────
+
+DATABASE
+   •  expenses table:  new nullable column
+      display_order integer
+   •  new index:  idx_expenses_project_order
+      on (project_id, display_order)
+
+ARCHITECTURE
+   •  Added sortExpenses() helper that orders by
+      display_order (NULLS LAST) then created_at
+   •  Added highlightParts() utility — reusable for any
+      future search/filter feature
+   •  New GlobalSearchModal component (~200 lines)
+   •  Deep-link plumbing: requestedSec + requestedVendor
+      props passed from DirectorApp → SettingsTab →
+      VendorsSection so global search can auto-open a
+      vendor's edit modal
+   •  Removed html2pdf.js CDN script — saved ~270 KB on
+      every page load (we ultimately stayed with HTML
+      exports because Arabic ligatures looked cleaner)
+
+CODE QUALITY  (from diagnostic script)
+   •  0 function duplicates
+   •  554 balanced backticks
+   •  All braces balanced per top-level function
+   •  0 arrow functions inside QuotationEditor
+      (var/function rule preserved)
+
+
+───────────────────────────────────────────────────────────────────
+  📦  MIGRATION REQUIRED
+───────────────────────────────────────────────────────────────────
+
+   Run this once in Supabase SQL editor before deploying:
+
+      ALTER TABLE expenses
+        ADD COLUMN IF NOT EXISTS display_order integer;
+
+      CREATE INDEX IF NOT EXISTS idx_expenses_project_order
+        ON expenses(project_id, display_order);
+
+   Safe to run multiple times. No data loss.
+
+
+───────────────────────────────────────────────────────────────────
+  ⚠️  BREAKING CHANGES
+───────────────────────────────────────────────────────────────────
+
+   None.
+
+   All changes are backward compatible. Old expenses
+   without display_order render in their original
+   created_at order (fallback). Old quotations without
+   the new notes field show without that section.
+
+
+───────────────────────────────────────────────────────────────────
+  📊  STATS
+───────────────────────────────────────────────────────────────────
+
+   Tasks completed this cycle:           37
+   New components added:                  2
+      (GlobalSearchModal, LogoMway)
+   Bug fixes:                            8+
+   Backups saved during work:             5
+   Final file size:                  ~340 KB
+
+
+───────────────────────────────────────────────────────────────────
+  🔮  NEXT UP (v2.1 candidates)
+───────────────────────────────────────────────────────────────────
+
+   •  💰 Vendor spending tracker
+        (per-vendor: total spent + last purchase date)
+   •  👥 Crew Database
+        (complete the "قريباً" placeholder in Settings)
+   •  🔔 Smart Reminders Panel on Home
+        (overdue quotes / aging custody / upcoming deliveries)
+   •  📱 WhatsApp Share buttons after each export
+   •  ↶  Undo last action (toast with 5-second undo)
+
+
+═══════════════════════════════════════════════════════════════════
+  End of release notes  —  m-way app v2.0 "Wayfinder" 🧭
+═══════════════════════════════════════════════════════════════════

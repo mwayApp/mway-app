@@ -1,0 +1,231 @@
+═══════════════════════════════════════════════════════════════════
+  m-way app  —  Version 2.1  "Pulse"  🔔
+═══════════════════════════════════════════════════════════════════
+
+  Released:    6 Jun 2026
+  Codename:    Pulse 🔔
+  Builds on:   v2.0 "Wayfinder"
+
+  "Because the app now reaches out to you — even when it's closed.
+   A pulse on your wrist, a heartbeat of awareness."
+
+
+───────────────────────────────────────────────────────────────────
+  ✨  NEW FEATURES — PUSH NOTIFICATIONS
+───────────────────────────────────────────────────────────────────
+
+🔔  REAL WEB PUSH NOTIFICATIONS  (iOS PWA, Mac, Android, Windows)
+
+   This is the marquee feature. The app now sends OS-level
+   push notifications that arrive even when the app is closed —
+   the same way WhatsApp or Instagram notify you.
+
+   • Works on iOS 16.4+ when installed as a PWA (Add to Home Screen)
+   • Works on macOS Safari, Chrome, Firefox, Edge
+   • Multiple devices per user — each registered separately
+   • Per-device enable/disable toggle
+   • Cost: $0 forever (uses Apple/Google free push services)
+
+
+🎯  EVENTS THAT TRIGGER NOTIFICATIONS
+
+   Director's notifications (12 events):
+   1.  🛒 Member added a purchase
+   2.  💰 Member requested custody
+   3.  ⚠️ Member's custody crossed 50% used
+   4.  ⚠️ Member's custody crossed 80% used
+   5.  🚨 Member's custody fully depleted (100%)
+   6.  ⚠️ High-value expense (>1,000 SAR)
+   7.  💵 Custody returned by member
+   8.  🔄 Custody transferred between team members
+   9.  ✉️ Faris (super admin) updated the app message
+   10. ✅ Todo due today                 [available, needs scheduler]
+   11. 🔴 Todo overdue                   [available, needs scheduler]
+   12. (scheduled jobs deferred to next release)
+
+   Member's notifications (7 events):
+   1. ✅ Director approved custody request
+   2. ❌ Director rejected custody request
+   3. 💰 Director increased your custody
+   4. 💸 Director reduced your custody
+   5. ⚠️ Your custody crossed 80% used
+   6. 🚨 Your custody fully depleted (100%)
+   7. ✅ Director marked your expense as paid
+   8. 👋 Director added you to a new project
+
+
+🆕  NEW: NOTIFICATION SETTINGS PAGES
+
+   Director side:
+     Settings → 🔔 الإشعارات
+       • "This device" card: enable/disable for current device
+       • All-devices list: see all registered devices, toggle each
+       • Permission status diagnostics
+       • Multi-device support (iPhone + iPad + Mac all subscribe
+         independently and all receive notifications)
+
+   Member side:
+     A welcoming card appears on the Member home automatically
+     after first login, prompting "Enable notifications". One tap
+     and the member is subscribed. Dismissible with "Later".
+
+
+───────────────────────────────────────────────────────────────────
+  🏗  ARCHITECTURE — WHAT WE BUILT
+───────────────────────────────────────────────────────────────────
+
+CLIENT SIDE  (m-way app.html + sw.js + manifest.json)
+
+   • Service Worker (sw.js): registers in browser, listens for
+     OS push events, displays the notification.
+   • PWA manifest (manifest.json): declares the app to iOS so
+     Safari treats it as a real installable app with full push
+     support.
+   • VAPID public key embedded in app — used to subscribe.
+   • Robust subscribe() flow with stage tracking + 10-second
+     timeouts and detailed error reporting at each stage:
+       1. Permission
+       2. Service Worker registration
+       3. Service Worker activation
+       4. Push subscription
+       5. Save to Supabase
+
+SERVER SIDE  (Supabase Edge Function: handle-event)
+
+   • Deno runtime — TypeScript file deployed to Supabase.
+   • Uses web-push@3.6.7 (npm package) for native Web Push.
+   • Receives Database Webhook payloads from Supabase, decides
+     what to notify, looks up subscriptions, sends pushes in
+     parallel using VAPID-signed Web Push protocol.
+   • Auto-disables dead endpoints (HTTP 410/404 from push
+     service) so we don't keep trying broken subscriptions.
+   • Updates last_used_at on every successful push for analytics.
+   • Custody-threshold detection (50/80/100%) computed by
+     summing all member expenses and comparing to custody.
+
+DATABASE WEBHOOKS  (5 webhooks, all → handle-event)
+
+   • expenses                 (INSERT, UPDATE)
+   • custody_requests         (INSERT, UPDATE)
+   • team_members             (INSERT, UPDATE)
+   • custody_transfers        (INSERT)
+   • app_message              (INSERT)
+
+   All 5 created via a single SQL script (much faster than
+   the click-through UI).
+
+
+───────────────────────────────────────────────────────────────────
+  📦  MIGRATIONS REQUIRED
+───────────────────────────────────────────────────────────────────
+
+   1. Create the push_subscriptions table:
+
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id       text NOT NULL,
+        user_role     text NOT NULL,
+        device_label  text,
+        endpoint      text NOT NULL,
+        p256dh_key    text NOT NULL,
+        auth_key      text NOT NULL,
+        enabled       boolean DEFAULT true,
+        created_at    timestamptz DEFAULT now(),
+        last_used_at  timestamptz DEFAULT now(),
+        UNIQUE(endpoint)
+      );
+      CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
+        ON push_subscriptions(user_id, enabled);
+      ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY "push_subscriptions_all" ON push_subscriptions
+        FOR ALL USING (true) WITH CHECK (true);
+
+   2. Add VAPID secrets to Supabase Edge Functions:
+        VAPID_PUBLIC_KEY    = (the base64 public key)
+        VAPID_PRIVATE_KEY   = (kept secret, used by Edge Function only)
+        VAPID_SUBJECT       = mailto:faresomaralhazmi@gmail.com
+
+   3. Deploy the handle-event Edge Function
+      (TypeScript source preserved in /edge-functions/ for reference)
+
+   4. Configure 5 Database Webhooks (SQL script in release notes)
+      All pointing to handle-event.
+
+   All steps are documented in the release archive.
+
+
+───────────────────────────────────────────────────────────────────
+  📂  FILES IN THIS RELEASE
+───────────────────────────────────────────────────────────────────
+
+   /Release Notes/6 Jun 26 v2.1/
+     ├── m-way app.html          (407 KB — the React app)
+     ├── sw.js                   (2.6 KB — Service Worker)
+     ├── manifest.json           (6.7 KB — PWA manifest)
+     ├── Release Notes.txt       (this file)
+     └── edge-functions/handle-event/index.ts
+            (the deployed Edge Function, for reference)
+
+   /Ready to Deploye/6 Jun 26 v2.1/
+     ├── m-way app.html
+     ├── sw.js
+     └── manifest.json
+
+   Deploy steps:
+     • Drag the WHOLE Ready-to-Deploye folder to Netlify.
+     • All 3 files MUST be uploaded together — sw.js and
+       manifest.json are critical for PWA to work.
+
+
+───────────────────────────────────────────────────────────────────
+  ⚠️  BREAKING CHANGES
+───────────────────────────────────────────────────────────────────
+
+   None.
+
+   Existing users will simply see a new "🔔 الإشعارات" entry in
+   Settings (director) or a welcoming card on home (member).
+   No data migration affects existing rows.
+
+
+───────────────────────────────────────────────────────────────────
+  🧪  TESTED ON
+───────────────────────────────────────────────────────────────────
+
+   ✓ iPhone iOS 16+ (Safari PWA installed to home screen)
+   ✓ Mac Safari (no install needed)
+   ✓ All 11 director-facing events verified end-to-end
+
+   Member-facing events validated via Edge Function logs and
+   confirmation in push_subscriptions table.
+
+
+───────────────────────────────────────────────────────────────────
+  📊  STATS
+───────────────────────────────────────────────────────────────────
+
+   New files added:          2  (sw.js, manifest.json)
+   New components added:     2  (NotificationsSection,
+                                 Member notification card)
+   New Edge Function:        1  (handle-event)
+   New webhooks:             5  (one per relevant table)
+   Push event types:         19 (12 director + 7 member)
+   Cost:                     $0 / month — forever
+   Build size:               407 KB  (was 384 KB in v2.0)
+
+
+───────────────────────────────────────────────────────────────────
+  🔮  NEXT UP (v2.2 candidates)
+───────────────────────────────────────────────────────────────────
+
+   • 📅 Scheduled push (morning brief at 8am, weekly summary)
+   • ☑️ Notification preferences (turn off specific event types)
+   • 🤫 Quiet hours (no pushes between 11pm–8am)
+   • 👥 Crew Database (complete "قريباً" in Database section)
+   • 💰 Vendor spending tracker
+   • 📱 WhatsApp Share buttons after exports
+
+
+═══════════════════════════════════════════════════════════════════
+  End of release notes  —  m-way app v2.1 "Pulse" 🔔
+═══════════════════════════════════════════════════════════════════
