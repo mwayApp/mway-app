@@ -331,21 +331,65 @@ const MWAY_EXPORT = {
    PROJECT STATUSES
 ══════════════════════════════════════ */
 const PROJECT_STATUSES = [
-  // Work statuses
-  {id:"pricing",       label:"قيد التسعير",        emoji:"📋", color:"#8A8A8A", group:"work"},
-  {id:"quote_sent",    label:"تم إرسال التسعيرة",  emoji:"📤", color:"#5B8DEE", group:"work"},
-  {id:"awaiting",      label:"انتظار التعميد",      emoji:"⏳", color:"#D4A017", group:"work"},
-  {id:"commissioned",  label:"تم التعميد",          emoji:"✅", color:"#28A870", group:"work"},
-  {id:"ready",         label:"جاهز للعمل",          emoji:"🎨", color:"#40C084", group:"work"},
-  {id:"shooting",      label:"تصوير جارٍ",          emoji:"🎬", color:"#E88AB0", group:"work"},
-  {id:"balancing",     label:"موازنة الفواتير",     emoji:"🧾", color:"#8B6BE8", group:"work"},
-  {id:"done",          label:"تم الإنجاز",          emoji:"🏁", color:"#3A8CC4", group:"work"},
-  {id:"archived",      label:"مؤرشف",               emoji:"🗄️", color:"#606060", group:"work"},
-  // Financial statuses
+  // Work statuses (4 stages — Sales Pipeline)
+  {id:"talk",    label:"محادثة", emoji:"💬", color:"#8A8A8A", group:"work", order:1},
+  {id:"quoted",  label:"تسعيرة", emoji:"💰", color:"#D4A017", group:"work", order:2},
+  {id:"active",  label:"نشط",     emoji:"🎬", color:"#28A870", group:"work", order:3},
+  {id:"done",    label:"منتهي",   emoji:"✅", color:"#3A8CC4", group:"work", order:4},
+  // Financial statuses (unchanged)
   {id:"payment_pending",  label:"معلق الدفع",       emoji:"💸", color:"#E8506A", group:"finance"},
   {id:"payment_partial",  label:"مدفوع جزئياً",     emoji:"💰", color:"#D4A017", group:"finance"},
   {id:"payment_done",     label:"مدفوع بالكامل",    emoji:"✔️", color:"#28A870", group:"finance"},
 ];
+const WORK_STAGES = PROJECT_STATUSES.filter(s=>s.group==="work").sort((a,b)=>a.order-b.order);
+const STAGE_ORDER = {talk:1, quoted:2, active:3, done:4};
+// Legacy status mapping — helps if any old status shows up unexpectedly
+function normalizeLegacyStatus(s){
+  const map={pricing:"talk",quote_sent:"quoted",awaiting:"quoted",commissioned:"active",ready:"active",shooting:"active",balancing:"active",archived:"done"};
+  return map[s]||s||"talk";
+}
+// Advance project stage forward only. Never move backward. Append to stage_history.
+// Returns { changed: bool, from, to }
+async function advanceProjectStage(project, targetStage, sbClient){
+  const current = normalizeLegacyStatus(project.status);
+  const currentOrder = STAGE_ORDER[current] || 0;
+  const targetOrder = STAGE_ORDER[targetStage] || 0;
+  if(targetOrder <= currentOrder) return {changed:false, from:current, to:current};
+  const now = new Date().toISOString();
+  const history = Array.isArray(project.stageHistory) ? project.stageHistory.slice() : [];
+  history.push({stage:targetStage, at:now});
+  try{
+    await sbClient.patch("projects", project.id, {status:targetStage, stage_history:history});
+    return {changed:true, from:current, to:targetStage, history:history};
+  }catch(e){
+    console.error("advanceProjectStage error:", e.message||e);
+    return {changed:false, from:current, to:current, error:e};
+  }
+}
+// Compute days-in-current-stage from stage_history
+function daysInCurrentStage(project){
+  const hist = Array.isArray(project.stageHistory) ? project.stageHistory : [];
+  const last = hist.length ? hist[hist.length-1] : null;
+  if(!last || !last.at) return 0;
+  const then = new Date(last.at);
+  const now = new Date();
+  return Math.max(0, Math.floor((now - then) / (1000*60*60*24)));
+}
+// Compute days between two stage-history entries
+function daysBetween(a, b){
+  if(!a || !b) return 0;
+  return Math.max(0, Math.floor((new Date(b) - new Date(a)) / (1000*60*60*24)));
+}
+// Total project lifecycle days (first entry → now, or last entry if done)
+function totalLifecycleDays(project){
+  const hist = Array.isArray(project.stageHistory) ? project.stageHistory : [];
+  if(!hist.length) return 0;
+  const first = hist[0].at;
+  const last = project.status === "done" && hist.length > 1
+    ? hist[hist.length-1].at
+    : new Date().toISOString();
+  return daysBetween(first, last);
+}
 
 const getStatus  = id => PROJECT_STATUSES.find(s=>s.id===id)||PROJECT_STATUSES[0];
 const getFinance = id => PROJECT_STATUSES.find(s=>s.id===id&&s.group==="finance")||null;
@@ -1154,7 +1198,7 @@ function saveQuotations(list) {
 
 var qNewItem = function() { return {id:uid(), description:"", qty:"1", unitPrice:"", total:0}; };
 
-function QuotationEditor({quotation:init, banks, onSave, onClose, onCreateProject}) {
+function QuotationEditor({quotation:init, banks, onSave, onClose, onCreateProject, projects, requestedProjectId}) {
   var T = useT();
   var defContact = loadContact();
   var isNew = !init;
@@ -1163,6 +1207,7 @@ function QuotationEditor({quotation:init, banks, onSave, onClose, onCreateProjec
     id: uid(),
     title: "",
     issueDate: today(),
+    projectId: requestedProjectId || "",
     clientName: "",
     clientCompany: "",
     clientCR: "",
@@ -1181,6 +1226,7 @@ function QuotationEditor({quotation:init, banks, onSave, onClose, onCreateProjec
     status: "draft",
     createdAt: new Date().toISOString(),
   });
+  var linkedProject = (projects||[]).find(function(p){return p.id===q.projectId;});
   var [openNotes, setOpenNotes] = useState(function(){return {};});
   var toggleNote = function(id) { setOpenNotes(function(p){var n=Object.assign({},p);n[id]=!n[id];return n;}); };
   var [contact, setContact] = useState(defContact);
@@ -1245,6 +1291,23 @@ function QuotationEditor({quotation:init, banks, onSave, onClose, onCreateProjec
         <Card style={{marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:700,color:T.accent,marginBottom:10}}>بيانات التسعيرة</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {projects&&projects.length>0&&(
+              <div>
+                <label style={{fontSize:11,color:T.muted,fontWeight:600,display:"block",marginBottom:4}}>🔗 اربطها بمشروع (اختياري)</label>
+                <select value={q.projectId||""} onChange={function(e){var pid=e.target.value; upd("projectId",pid); var pp=(projects||[]).find(function(x){return x.id===pid;}); if(pp && !q.title){upd("title",pp.name); if(!q.clientName && pp.producer) upd("clientName",pp.producer);} }}
+                  style={{width:"100%",background:T.card2,border:"1px solid "+T.border,borderRadius:9,padding:"9px 12px",color:T.text,fontSize:13,outline:"none",fontFamily:"'DM Sans','Tajawal',sans-serif",direction:"rtl"}}>
+                  <option value="">— بدون ربط —</option>
+                  {projects.map(function(p){var s=PROJECT_STATUSES.find(function(x){return x.id===normalizeLegacyStatus(p.status);}); return <option key={p.id} value={p.id}>{(s?s.emoji+" ":"")+p.name+(p.producer?" · "+p.producer:"")}</option>;})}
+                </select>
+                <div style={{fontSize:10,color:T.muted,marginTop:4}}>💡 عند الحفظ، المشروع ينتقل تلقائياً لمرحلة "💰 تسعيرة"</div>
+              </div>
+            )}
+            {linkedProject&&linkedProject.description&&(
+              <div style={{background:T.accent+"11",border:"1.5px solid "+T.accent+"44",borderRadius:11,padding:"10px 12px"}}>
+                <div style={{fontSize:10,color:T.accent,fontWeight:700,letterSpacing:"0.14em",marginBottom:6,fontFamily:"'DM Mono',monospace"}}>📝 وصف المشروع (من المحادثة)</div>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.7,whiteSpace:"pre-wrap"}} dir="auto">{linkedProject.description}</div>
+              </div>
+            )}
             <Inp label="عنوان المشروع *" value={q.title} onChange={function(e){upd("title",e.target.value);}} placeholder="اسم المشروع..."/>
             <Inp label="تاريخ الإصدار" type="date" value={q.issueDate} onChange={function(e){upd("issueDate",e.target.value);}}/>
           </div>
@@ -2646,7 +2709,7 @@ function NotificationsPanel({projectId, onClose}) {
 /* ══════════════════════════════════════
    DIRECTOR PROJECT PAGE
 ══════════════════════════════════════ */
-function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[],setTodos=()=>{},projectsList=[],audience=[],setAudience=()=>{},invitations=[],setInvitations=()=>{},surveyQuestions=[],setSurveyQuestions=()=>{},surveyResponses=[],setSurveyResponses=()=>{},customInterests=[],customCities=[]}) {
+function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[],setTodos=()=>{},projectsList=[],audience=[],setAudience=()=>{},invitations=[],setInvitations=()=>{},surveyQuestions=[],setSurveyQuestions=()=>{},surveyResponses=[],setSurveyResponses=()=>{},customInterests=[],customCities=[],autoAdvance=()=>{},savedQuotes=[]}) {
   const T=useT();
   const [subTab,setSubTab]=useState("expenses");
   const [filterPay,setFilterPay]=useState("all");
@@ -2656,6 +2719,7 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
   const [showProjTodos,setShowProjTodos]=useState(false);
   const [editingExp,setEditingExp]=useState(null);
   const [showEditProj,setShowEditProj]=useState(false);
+  const [showDetails,setShowDetails]=useState(false);
   const [showAddMember,setShowAddMember]=useState(false);
   const [topUpTarget,setTopUpTarget]=useState(null);
   const [activityLog,setActivityLog]=useState([]);
@@ -2712,6 +2776,8 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
           receipt_name:exp.receipt_name||null,receipt_url:exp.receipt_url||null});
         await sb.log(project.id,"director","add_expense",`${exp.name} — ${fmt(exp.amount)}`);
         onUpdate({...project,expenses:[...expenses,{...exp,id:row?.id||exp.id,member_id:memberId}]});
+        // Auto-advance to active on first expense
+        autoAdvance(project.id,"active");
       } else {
         await sb.patch("expenses",exp.id,{name:exp.name,description:exp.description,store:exp.store,
           date:exp.date||null,amount:exp.amount,type:exp.type,paid:exp.paid,member_id:memberId,
@@ -2865,6 +2931,8 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
       await sb.log(project.id,"director","add_member",`${f.display_name} (@${f.username})`);
       onUpdate({...project,teamMembers:[...members,{...f,id:row.id,dailyCalc:f.dailyCalc}]});
       setShowAddMember(false); showToast("تمت إضافة العضو ✓");
+      // Auto-advance to active on first team member added
+      autoAdvance(project.id,"active");
     }catch{ showToast("خطأ — ربما الاسم مكرر","err"); }
     setSaving(false);
   };
@@ -2955,11 +3023,12 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
           <div style={{textAlign:"center",flex:1}}>
             <div style={{fontSize:15,fontWeight:800,color:T.text}}>{project.name}</div>
             <Row style={{gap:5,justifyContent:"center",marginTop:3,flexWrap:"wrap"}}>
-              <StatusBadge statusId={project.status||"pricing"}/>
+              <StatusBadge statusId={project.status||"talk"}/>
               {project.financeStatus&&<StatusBadge statusId={project.financeStatus}/>}
             </Row>
           </div>
           <Row style={{gap:6}}>
+            <Btn variant="subtle" sm onClick={()=>setShowDetails(true)} style={{padding:"7px 10px"}} title="تفاصيل المشروع">🔍</Btn>
             <Btn variant="subtle" sm onClick={()=>setShowEditProj(true)} style={{padding:"7px 10px"}}><Ic d={I.edit} s={15} c={T.textS}/></Btn>
             <Btn variant="danger" sm onClick={deleteProject} style={{padding:"7px 10px"}}><Ic d={I.trash} s={15} c={T.warnText}/></Btn>
           </Row>
@@ -3198,7 +3267,7 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
 
         {/* GUESTS / INVITATIONS TAB */}
         {subTab==="guests"&&project.hostingEnabled&&(
-          <InvitationsTab project={project} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} showToast={showToast}/>
+          <InvitationsTab project={project} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} showToast={showToast} autoAdvance={autoAdvance}/>
         )}
 
         {/* SEARCH TAB */}
@@ -3361,6 +3430,7 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
       {showAddMember&&<AddMemberModal project={project} onSave={addMember} onClose={()=>setShowAddMember(false)}/>}
       {topUpTarget&&<TopUpModal member={topUpTarget} members={members} project={project} onSave={doTopUp} onClose={()=>setTopUpTarget(null)}/>}
       {showEditProj&&<EditProjectModal project={project} onSave={p=>{onUpdate(p);setShowEditProj(false);}} onClose={()=>setShowEditProj(false)}/>}
+      {showDetails&&<ProjectDetailsModal project={project} savedQuotes={savedQuotes} onClose={()=>setShowDetails(false)}/>}
       {viewingReceipt&&<ReceiptModal expense={viewingReceipt} onClose={()=>setViewingReceipt(null)}/>}
       {viewingMoodboard&&project.moodboardFile&&<FileViewModal name={project.moodboardName||"مود بورد"} file={project.moodboardFile} onClose={()=>setViewingMoodboard(false)}/>}
     </div>
@@ -3571,12 +3641,12 @@ function AddMemberModal({project,onSave,onClose}) {
 function EditProjectModal({project,onSave,onClose}) {
   const T=useT();
   const calc=dc=>{ const sT=(parseFloat(dc?.dailyRate)||0)*(parseFloat(dc?.shootDays)||0); const pT=(parseFloat(dc?.prepRate)||0)*(parseFloat(dc?.prepDays)||0); const fx=parseFloat(dc?.fixedAmount)||0; return fx>0&&!sT&&!pT?fx:sT+pT; };
-  const [f,setF]=useState({name:project.name||"",producer:project.producer||"",budget:project.budget||"",custody:project.custody||"",myDailyCalc:project.myDailyCalc||{},status:project.status||"pricing",financeStatus:project.financeStatus||null,startDate:project.startDate||"",deliveryDate:project.deliveryDate||"",moodboardName:project.moodboardName||null,moodboardFile:project.moodboardFile||null,moodboardDesc:project.moodboardDesc||"",hostingEnabled:!!project.hostingEnabled,eventCategory:project.eventCategory||null});
+  const [f,setF]=useState({name:project.name||"",producer:project.producer||"",budget:project.budget||"",custody:project.custody||"",myDailyCalc:project.myDailyCalc||{},status:normalizeLegacyStatus(project.status),financeStatus:project.financeStatus||null,startDate:project.startDate||"",deliveryDate:project.deliveryDate||"",firstContactDate:project.firstContactDate||"",description:project.description||"",moodboardName:project.moodboardName||null,moodboardFile:project.moodboardFile||null,moodboardDesc:project.moodboardDesc||"",hostingEnabled:!!project.hostingEnabled,eventCategory:project.eventCategory||null});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const save=async()=>{
     if(!f.name.trim()) return;
-    const updated={...project,name:f.name.trim(),producer:f.producer.trim(),budget:parseFloat(f.budget)||0,custody:parseFloat(f.custody)||0,myDaily:calc(f.myDailyCalc),myDailyCalc:f.myDailyCalc,status:f.status,financeStatus:f.financeStatus,startDate:f.startDate,deliveryDate:f.deliveryDate,moodboardName:f.moodboardName,moodboardFile:f.moodboardFile,moodboardDesc:f.moodboardDesc,hostingEnabled:f.hostingEnabled,eventCategory:f.hostingEnabled?f.eventCategory:null};
-    try{ await sb.patch("projects",project.id,{name:updated.name,producer:updated.producer,budget:updated.budget,custody:updated.custody,my_daily:updated.myDaily,my_daily_calc:updated.myDailyCalc,status:updated.status,finance_status:updated.financeStatus,start_date:updated.startDate||null,delivery_date:updated.deliveryDate||null,moodboard_name:updated.moodboardName,moodboard_file:updated.moodboardFile,moodboard_desc:updated.moodboardDesc,hosting_enabled:updated.hostingEnabled,event_category:updated.eventCategory}); }catch(e){console.error("PATCH ERROR:",e.message);}
+    const updated={...project,name:f.name.trim(),producer:f.producer.trim(),budget:parseFloat(f.budget)||0,custody:parseFloat(f.custody)||0,myDaily:calc(f.myDailyCalc),myDailyCalc:f.myDailyCalc,status:f.status,financeStatus:f.financeStatus,startDate:f.startDate,deliveryDate:f.deliveryDate,firstContactDate:f.firstContactDate||null,description:f.description||"",moodboardName:f.moodboardName,moodboardFile:f.moodboardFile,moodboardDesc:f.moodboardDesc,hostingEnabled:f.hostingEnabled,eventCategory:f.hostingEnabled?f.eventCategory:null};
+    try{ await sb.patch("projects",project.id,{name:updated.name,producer:updated.producer,budget:updated.budget,custody:updated.custody,my_daily:updated.myDaily,my_daily_calc:updated.myDailyCalc,status:updated.status,finance_status:updated.financeStatus,start_date:updated.startDate||null,delivery_date:updated.deliveryDate||null,first_contact_date:updated.firstContactDate,description:updated.description||null,moodboard_name:updated.moodboardName,moodboard_file:updated.moodboardFile,moodboard_desc:updated.moodboardDesc,hosting_enabled:updated.hostingEnabled,event_category:updated.eventCategory}); }catch(e){console.error("PATCH ERROR:",e.message);}
     onSave(updated);
   };
   return (
@@ -3589,9 +3659,14 @@ function EditProjectModal({project,onSave,onClose}) {
           <Inp label="العهدة" type="number" value={f.custody} onChange={e=>set("custody",e.target.value)} placeholder="0"/>
         </Row>
         <Row style={{gap:10}}>
+          <Inp label="📅 تاريخ التواصل الأول" type="date" value={f.firstContactDate||""} onChange={e=>set("firstContactDate",e.target.value)}/>
           <Inp label="تاريخ البداية" type="date" value={f.startDate} onChange={e=>set("startDate",e.target.value)}/>
-          <Inp label="تاريخ التسليم" type="date" value={f.deliveryDate} onChange={e=>set("deliveryDate",e.target.value)}/>
         </Row>
+        <Inp label="تاريخ التسليم" type="date" value={f.deliveryDate} onChange={e=>set("deliveryDate",e.target.value)}/>
+        <div>
+          <label style={{fontSize:12,color:T.textS,fontWeight:700,display:"block",marginBottom:6}}>📝 وصف المشروع</label>
+          <SmartTextarea value={f.description} onChange={e=>set("description",e.target.value)} rows={4} placeholder={"مثال:\n- فعالية استضافة\n- 50 شخص\n- في الرياض\n\nاضغطي - أو ١. للترقيم التلقائي"}/>
+        </div>
         <DailyCalc value={f.myDailyCalc} onChange={v=>set("myDailyCalc",v)}/>
         <div style={{borderTop:`1.5px solid ${T.border}`,paddingTop:14}}>
           <ProjectStepper statusId={f.status} financeStatusId={f.financeStatus}
@@ -3616,15 +3691,60 @@ function EditProjectModal({project,onSave,onClose}) {
 }
 
 /* New Project Modal */
+function QuickAddLeadModal({onSave,onClose}){
+  const T=useT();
+  const [name,setName]=useState("");
+  const [producer,setProducer]=useState("");
+  const [contactDate,setContactDate]=useState(today());
+  const [description,setDescription]=useState("");
+  const save=()=>{
+    if(!name.trim()){ alert("اكتبي اسم المشروع"); return; }
+    const sid=makeShortId(name);
+    const now=new Date().toISOString();
+    onSave({
+      id:uid(), short_id:sid,
+      name:name.trim(), producer:producer.trim(),
+      budget:0, custody:0, myDaily:0, myDailyCalc:{},
+      status:"talk", financeStatus:null,
+      startDate:"", deliveryDate:"",
+      firstContactDate:contactDate||today(),
+      description:description||"",
+      stageHistory:[{stage:"talk", at:now}],
+      hostingEnabled:false, eventCategory:null,
+      expenses:[], teamMembers:[],
+      createdAt:today(),
+    });
+  };
+  return (
+    <Modal title="⚡ محادثة جديدة" onClose={onClose}>
+      <div style={{display:"flex",flexDirection:"column",gap:13}}>
+        <div style={{background:T.accent+"12",border:`1.5px solid ${T.accent}44`,borderRadius:12,padding:"10px 12px",fontSize:11,color:T.textS,lineHeight:1.6}}>
+          💡 سجّلي المشروع بمرحلة <b>محادثة</b> — الميزانية والتفاصيل تعبّى لاحقاً لما يتقدّم المشروع
+        </div>
+        <Inp label="اسم المشروع *" value={name} onChange={e=>setName(e.target.value)} placeholder="مثال: فعالية كافيه ندى" autoFocus/>
+        <Inp label="👤 اسم المنتج / العميل" value={producer} onChange={e=>setProducer(e.target.value)} placeholder="اسم اللي كلّمك"/>
+        <Inp label="📅 تاريخ التواصل الأول" type="date" value={contactDate} onChange={e=>setContactDate(e.target.value)}/>
+        <div>
+          <label style={{fontSize:12,color:T.textS,fontWeight:700,display:"block",marginBottom:6}}>📝 وصف المشروع (اختياري)</label>
+          <SmartTextarea value={description} onChange={e=>setDescription(e.target.value)} rows={5} placeholder={"مثال:\n- فعالية استضافة 50 شخص\n- في الرياض\n- تصوير + دعوات + قهوة\n\nاضغطي - أو ١. للترقيم التلقائي"}/>
+          <div style={{fontSize:10,color:T.muted,marginTop:4}}>يظهر لك هذا الوصف عند إعداد التسعيرة</div>
+        </div>
+        <Btn full onClick={save}><Ic d={I.check} s={16}/> حفظ في المحادثات</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function NewProjectModal({onSave,onClose}) {
   const T=useT();
   const calc=dc=>{ const sT=(parseFloat(dc?.dailyRate)||0)*(parseFloat(dc?.shootDays)||0); const pT=(parseFloat(dc?.prepRate)||0)*(parseFloat(dc?.prepDays)||0); const fx=parseFloat(dc?.fixedAmount)||0; return fx>0&&!sT&&!pT?fx:sT+pT; };
-  const [f,setF]=useState({name:"",producer:"",budget:"",custody:"",myDailyCalc:{},status:"pricing",financeStatus:null,startDate:"",deliveryDate:"",hostingEnabled:false,eventCategory:null});
+  const [f,setF]=useState({name:"",producer:"",budget:"",custody:"",myDailyCalc:{},status:"talk",financeStatus:null,startDate:"",deliveryDate:"",firstContactDate:today(),description:"",hostingEnabled:false,eventCategory:null});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const save=()=>{
     if(!f.name.trim()) return;
     const sid=makeShortId(f.name);
-    onSave({id:uid(),short_id:sid,name:f.name.trim(),producer:f.producer.trim(),budget:parseFloat(f.budget)||0,custody:parseFloat(f.custody)||0,myDaily:calc(f.myDailyCalc),myDailyCalc:f.myDailyCalc,status:f.status,financeStatus:f.financeStatus,startDate:f.startDate,deliveryDate:f.deliveryDate,hostingEnabled:f.hostingEnabled,eventCategory:f.hostingEnabled?f.eventCategory:null,expenses:[],teamMembers:[],createdAt:today()});
+    const now=new Date().toISOString();
+    onSave({id:uid(),short_id:sid,name:f.name.trim(),producer:f.producer.trim(),budget:parseFloat(f.budget)||0,custody:parseFloat(f.custody)||0,myDaily:calc(f.myDailyCalc),myDailyCalc:f.myDailyCalc,status:f.status,financeStatus:f.financeStatus,startDate:f.startDate,deliveryDate:f.deliveryDate,firstContactDate:f.firstContactDate||today(),description:f.description||"",stageHistory:[{stage:f.status||"talk",at:now}],hostingEnabled:f.hostingEnabled,eventCategory:f.hostingEnabled?f.eventCategory:null,expenses:[],teamMembers:[],createdAt:today()});
   };
   return (
     <Modal title="✨ مشروع جديد" onClose={onClose}>
@@ -3636,9 +3756,14 @@ function NewProjectModal({onSave,onClose}) {
           <Inp label="العهدة (ر.س)" type="number" value={f.custody} onChange={e=>set("custody",e.target.value)} placeholder="0"/>
         </Row>
         <Row style={{gap:10}}>
+          <Inp label="📅 تاريخ التواصل الأول" type="date" value={f.firstContactDate} onChange={e=>set("firstContactDate",e.target.value)}/>
           <Inp label="تاريخ البداية" type="date" value={f.startDate} onChange={e=>set("startDate",e.target.value)}/>
-          <Inp label="تاريخ التسليم" type="date" value={f.deliveryDate} onChange={e=>set("deliveryDate",e.target.value)}/>
         </Row>
+        <Inp label="تاريخ التسليم" type="date" value={f.deliveryDate} onChange={e=>set("deliveryDate",e.target.value)}/>
+        <div>
+          <label style={{fontSize:12,color:T.textS,fontWeight:700,display:"block",marginBottom:6}}>📝 وصف المشروع</label>
+          <SmartTextarea value={f.description} onChange={e=>set("description",e.target.value)} rows={4} placeholder={"مثال:\n- فعالية استضافة\n- 50 شخص\n\nاضغطي - أو ١. للترقيم"}/>
+        </div>
         <DailyCalc value={f.myDailyCalc} onChange={v=>set("myDailyCalc",v)}/>
         <HostingToggleBlock enabled={f.hostingEnabled} category={f.eventCategory} onToggle={v=>set("hostingEnabled",v)} onCategory={v=>set("eventCategory",v)}/>
         <Btn full onClick={save}><Ic d={I.check} s={16}/> إنشاء المشروع</Btn>
@@ -3675,6 +3800,97 @@ function HostingToggleBlock({enabled,category,onToggle,onCategory}){
         </div>
       )}
     </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   PROJECT DETAILS MODAL — lifecycle timeline view
+══════════════════════════════════════ */
+function ProjectDetailsModal({project,savedQuotes,onClose}){
+  const T=useT();
+  const hist=Array.isArray(project.stageHistory)?project.stageHistory:[];
+  const linkedQuotes=(savedQuotes||[]).filter(q=>q.projectId===project.id);
+  const fmtDate=(iso)=>{ try{return new Date(iso).toLocaleDateString("ar-SA",{year:"numeric",month:"long",day:"numeric"});}catch(e){return iso;} };
+  const totalDays=totalLifecycleDays(project);
+  const currentStage=normalizeLegacyStatus(project.status);
+
+  return (
+    <Modal title="🔍 تفاصيل المشروع" onClose={onClose}>
+      <div style={{maxHeight:"75vh",overflowY:"auto",padding:"2px"}}>
+        {/* Client info */}
+        <div style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+          <div style={{fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",marginBottom:6}}>معلومات العميل</div>
+          <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:4}}>{project.name}</div>
+          {project.producer&&<div style={{fontSize:12,color:T.text,marginBottom:4}}>👤 {project.producer}</div>}
+          {project.firstContactDate&&<div style={{fontSize:11,color:T.muted}}>📅 التواصل الأول: {fmtDate(project.firstContactDate)}</div>}
+        </div>
+
+        {/* Description */}
+        {project.description&&(
+          <div style={{background:T.accent+"10",border:`1.5px solid ${T.accent}33`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+            <div style={{fontSize:10,color:T.accent,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",marginBottom:6,fontWeight:700}}>📝 وصف المشروع</div>
+            <div style={{fontSize:13,color:T.text,lineHeight:1.7,whiteSpace:"pre-wrap"}} dir="auto">{project.description}</div>
+          </div>
+        )}
+
+        {/* Stage timeline */}
+        <div style={{background:T.card,border:`1.5px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12}}>
+          <div style={{fontSize:11,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",marginBottom:12,fontWeight:700}}>⏱ تايم لاين المراحل</div>
+          {WORK_STAGES.map((s,idx)=>{
+            const entered=hist.find(h=>h.stage===s.id);
+            const nextEntered=hist.find(h=>{
+              const hOrder=STAGE_ORDER[h.stage]||0;
+              return hOrder>STAGE_ORDER[s.id];
+            });
+            const isCurrent=currentStage===s.id;
+            const isReached=!!entered;
+            let daysHere=0;
+            if(entered){
+              const endDate=nextEntered?nextEntered.at:(isCurrent?new Date().toISOString():entered.at);
+              daysHere=daysBetween(entered.at,endDate);
+            }
+            return (
+              <div key={s.id} style={{display:"flex",gap:12,marginBottom:14,opacity:isReached?1:0.35}}>
+                <div style={{position:"relative",width:28,flexShrink:0}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:isReached?s.color:T.card2,border:`2px solid ${isReached?s.color:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>{s.emoji}</div>
+                  {idx<WORK_STAGES.length-1&&<div style={{position:"absolute",left:"50%",top:28,width:2,height:36,marginLeft:-1,background:isReached?s.color+"66":T.border}}/>}
+                </div>
+                <div style={{flex:1,paddingBottom:8}}>
+                  <div style={{fontSize:13,fontWeight:800,color:isReached?s.color:T.muted}}>{s.label}{isCurrent&&<span style={{fontSize:9,marginRight:6,background:s.color,color:"#fff",padding:"2px 6px",borderRadius:6,fontFamily:"'DM Mono',monospace",letterSpacing:"0.1em"}}>الحالية</span>}</div>
+                  {entered?(
+                    <>
+                      <div style={{fontSize:11,color:T.muted,marginTop:2}}>📅 دخل: {fmtDate(entered.at)}</div>
+                      {daysHere>0&&<div style={{fontSize:11,color:T.textS,marginTop:2,fontFamily:"'DM Mono',monospace"}}>⏱ {daysHere} يوم {isCurrent?"(حتى الآن)":""}</div>}
+                      {/* Show linked quotes when we hit the "quoted" stage */}
+                      {s.id==="quoted"&&linkedQuotes.length>0&&linkedQuotes.map(q=>{
+                        const items=(q.items||[]);
+                        const subtotal=items.reduce((sum,it)=>sum+(Number(it.total)||(Number(it.qty)||0)*(Number(it.unitPrice)||0)),0);
+                        return (
+                          <div key={q.id} style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,padding:"8px 10px",marginTop:6}}>
+                            <div style={{fontSize:12,fontWeight:700,color:T.text}}>📄 {q.title||"تسعيرة"}</div>
+                            <div style={{fontSize:11,color:T.muted,marginTop:2}}>💰 الإجمالي: {fmt(subtotal)}</div>
+                            {q.issueDate&&<div style={{fontSize:10,color:T.muted,marginTop:2,fontFamily:"'DM Mono',monospace"}}>{q.issueDate}</div>}
+                          </div>
+                        );
+                      })}
+                    </>
+                  ):(
+                    <div style={{fontSize:11,color:T.muted,marginTop:2,fontStyle:"italic"}}>لم يصلها بعد</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Total lifecycle */}
+        <div style={{background:T.accent+"18",border:`1.5px solid ${T.accent}55`,borderRadius:12,padding:"12px 14px",textAlign:"center"}}>
+          <div style={{fontSize:10,color:T.accent,fontFamily:"'DM Mono',monospace",letterSpacing:"0.16em",fontWeight:700,marginBottom:4}}>إجمالي دورة الحياة</div>
+          <div style={{fontSize:26,fontWeight:900,color:T.accent}}>{totalDays} <span style={{fontSize:14,fontWeight:700,color:T.muted}}>يوم</span></div>
+          <div style={{fontSize:10,color:T.muted,marginTop:4}}>من التواصل الأول {project.status==="done"?"إلى التسليم":"حتى الآن"}</div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -3855,7 +4071,7 @@ function SuperAdminApp({onLogout}) {
 /* ══════════════════════════════════════
    DIRECTOR TABS
 ══════════════════════════════════════ */
-function HomeTab({projects,unreadCount,todoCount,onOpen,onNew,onNewInvoice,onNotifications,onTodos,onGlobalSearch}) {
+function HomeTab({projects,unreadCount,todoCount,onOpen,onNew,onNewLead,onNewInvoice,onNotifications,onTodos,onGlobalSearch}) {
   const T=useT();
   const tS=projects.reduce((s,p)=>(p.expenses||[]).filter(e=>e.paid&&!e.returned).reduce((a,e)=>a+e.amount,s),0);
   const tC=projects.reduce((s,p)=>s+(Number(p.custody)||0),0);
@@ -3895,6 +4111,16 @@ function HomeTab({projects,unreadCount,todoCount,onOpen,onNew,onNewInvoice,onNot
           </div>
         </div>
       )}
+      {onNewLead&&(
+        <button className="press" onClick={onNewLead}
+          style={{width:"100%",background:T.card2,border:`1.5px dashed ${T.accent}66`,borderRadius:16,padding:"14px 16px",marginBottom:14,cursor:"pointer",display:"flex",alignItems:"center",gap:12,fontFamily:"Tajawal,sans-serif"}}>
+          <div style={{width:42,height:42,borderRadius:12,background:T.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>⚡</div>
+          <div style={{flex:1,textAlign:"right"}}>
+            <div style={{fontSize:14,fontWeight:800,color:T.text}}>+ محادثة جديدة</div>
+            <div style={{fontSize:11,color:T.muted,marginTop:2}}>سجّلي مشروع محتمل بمعلومات بسيطة</div>
+          </div>
+        </button>
+      )}
       <Row style={{justifyContent:"space-between",marginBottom:12}}>
         <div style={{fontSize:15,fontWeight:700,color:T.text}}>المشاريع الأخيرة</div>
         <Row style={{gap:6}}><Btn sm variant="ghost" onClick={onNew}><Ic d={I.plus} s={13}/> مشروع</Btn><Btn sm variant="subtle" onClick={()=>onNewInvoice&&onNewInvoice()}>🧾 فاتورة</Btn></Row>
@@ -3915,7 +4141,7 @@ function HomeTab({projects,unreadCount,todoCount,onOpen,onNew,onNewInvoice,onNot
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontWeight:700,fontSize:14,color:T.text,marginBottom:3}}>{p.name}</div>
                   <Row style={{gap:5,flexWrap:"wrap"}}>
-                    <StatusBadge statusId={p.status||"pricing"}/>
+                    <StatusBadge statusId={p.status||"talk"}/>
                     {p.financeStatus&&<StatusBadge statusId={p.financeStatus}/>}
                     {mc>0&&<span style={{fontSize:11,color:T.muted}}>👥 {mc}</span>}
                   </Row>
@@ -3935,77 +4161,164 @@ function HomeTab({projects,unreadCount,todoCount,onOpen,onNew,onNewInvoice,onNot
   );
 }
 
-function ProjectsTab({projects,onOpen,onNew,setEditInv,setShowInv}) {
+function ProjectsTab({projects,onOpen,onNew,onNewLead,setEditInv,setShowInv}) {
   const T=useT();
+  const [filterStage,setFilterStage]=useState("all");
+  const [showDone,setShowDone]=useState(false);
+  // Normalize legacy statuses on the fly (for old data not yet migrated)
+  const normalized=projects.map(p=>({...p,status:normalizeLegacyStatus(p.status)}));
+  const counts={
+    all:normalized.length,
+    talk:normalized.filter(p=>p.status==="talk").length,
+    quoted:normalized.filter(p=>p.status==="quoted").length,
+    active:normalized.filter(p=>p.status==="active").length,
+    done:normalized.filter(p=>p.status==="done").length,
+  };
+  const filtered=filterStage==="all"?normalized:normalized.filter(p=>p.status===filterStage);
+  const stuck=(p)=>{
+    if(p.status!=="talk"&&p.status!=="quoted") return false;
+    return daysInCurrentStage(p)>=10;
+  };
+  const renderCard=(p)=>{
+    const exp=p.expenses||[];
+    const spent=exp.filter(e=>e.paid&&!e.returned).reduce((s,e)=>s+e.amount,0);
+    const unpaid=exp.filter(e=>!e.paid&&!e.returned).reduce((s,e)=>s+e.amount,0);
+    const ov=spent>(Number(p.custody)||0); const pc=p.custody>0?(spent/p.custody)*100:0;
+    const mc=(p.teamMembers||[]).length;
+    const stageDays=daysInCurrentStage(p);
+    const totalDays=totalLifecycleDays(p);
+    const isStuck=stuck(p);
+    return (
+      <Card key={p.id} onClick={()=>onOpen(p.id)} style={{marginBottom:13,border:isStuck?`1.5px solid ${T.warn}55`:undefined}}>
+        {/* Header */}
+        <Row style={{justifyContent:"space-between",marginBottom:6,alignItems:"flex-start"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:800,fontSize:15,color:T.text,marginBottom:4,display:"flex",alignItems:"center",gap:6}}>
+              {p.name}
+              {isStuck&&<span title="عالق أكثر من 10 أيام" style={{fontSize:14}}>🔥</span>}
+            </div>
+            <Row style={{gap:6,flexWrap:"wrap"}}>
+              {p.short_id&&<span style={{fontSize:10,color:T.accent,fontFamily:"monospace",fontWeight:700,background:T.accent+"12",padding:"2px 6px",borderRadius:6}}>{p.short_id}</span>}
+              {p.producer&&<span style={{fontSize:11,color:T.muted}}>👤 {p.producer}</span>}
+              {mc>0&&<span style={{fontSize:11,color:T.muted}}>👥 {mc}</span>}
+            </Row>
+          </div>
+          <Ic d={I.chevron} s={18} c={T.muted}/>
+        </Row>
+        {/* Cycle time chips */}
+        {stageDays>0&&(
+          <Row style={{gap:6,marginBottom:10,flexWrap:"wrap"}}>
+            <StatusBadge statusId={p.status||"talk"}/>
+            <span style={{fontSize:10,color:isStuck?T.warnText:T.muted,fontFamily:"'DM Mono',monospace",background:isStuck?T.warn+"18":T.card2,padding:"3px 8px",borderRadius:6,fontWeight:700}}>
+              ⏱ {stageDays} يوم في هذه المرحلة
+            </span>
+            {totalDays>stageDays&&<span style={{fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace"}}>· إجمالي {totalDays} يوم</span>}
+            {p.financeStatus&&<StatusBadge statusId={p.financeStatus}/>}
+          </Row>
+        )}
+        {/* Stepper mini — only if we have any progress or budgets */}
+        {(p.budget>0||p.custody>0)&&(
+        <div style={{overflowX:"auto",marginBottom:10,paddingBottom:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:0,minWidth:"max-content"}}>
+            {WORK_STAGES.map((s,i,arr)=>{
+              const ci=WORK_STAGES.findIndex(x=>x.id===(p.status||"talk"));
+              const done=i<ci; const active=i===ci;
+              return(<div key={s.id} style={{display:"flex",alignItems:"center"}}>
+                <div style={{width:22,height:22,borderRadius:999,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,background:active?s.color:done?s.color+"33":T.card2,border:`1.5px solid ${active||done?s.color:T.border}`,opacity:done||active?1:0.35,transition:"all .2s"}}>
+                  {done?<span style={{fontSize:10,color:s.color}}>✓</span>:<span style={{fontSize:11}}>{s.emoji}</span>}
+                </div>
+                {i<arr.length-1&&<div style={{width:14,height:1.5,background:done?s.color:T.border,flexShrink:0}}/>}
+              </div>);
+            })}
+          </div>
+        </div>
+        )}
+        {/* Financials — only show if there's money involved */}
+        {(p.budget>0||p.custody>0||spent>0)&&(<>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>
+            {[["💰 الميزانية",fmt(p.budget),T.accent],["🤝 العهدة",fmt(p.custody),T.accent],["✓ المدفوع",fmt(spent),ov?T.warnText:T.okText]].map(([l,v,c])=>(
+              <div key={l} style={{background:T.card2,borderRadius:12,padding:"9px 10px"}}>
+                <div style={{fontSize:10,color:T.muted,fontWeight:600,marginBottom:2}}>{l}</div>
+                <div style={{fontSize:12,fontWeight:800,color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          <ProgressBar pct={pc} over={ov} h={6}/>
+          <Row style={{justifyContent:"space-between",marginTop:6,fontSize:11}}>
+            <span style={{color:T.muted}}>{Math.round(pc||0)}%</span>
+            <Row style={{gap:6}}>
+              {unpaid>0&&<Badge label={`⏳ ${fmt(unpaid)}`} color={T.accent}/>}
+              <Badge label={ov?"⚠ تجاوز":"✓ ضمن الحد"} color={ov?T.warnText:T.okText} bg={ov?T.warn+"20":T.ok+"20"}/>
+            </Row>
+          </Row>
+        </>)}
+      </Card>
+    );
+  };
+
   return (
     <div className="page" style={{padding:"28px 14px 0"}}>
-      <Row style={{justifyContent:"space-between",marginBottom:18}}>
-        <div style={{fontSize:20,fontWeight:900,color:T.text}}>كل المشاريع</div>
-        <Row style={{gap:6}}><Btn sm onClick={onNew}><Ic d={I.plus} s={15}/> مشروع</Btn><Btn sm variant="subtle" onClick={()=>{setEditInv(null);setShowInv(true);}}>🧾 فاتورة</Btn></Row>
+      <Row style={{justifyContent:"space-between",marginBottom:14}}>
+        <div style={{fontSize:20,fontWeight:900,color:T.text}}>Pipeline</div>
+        <Row style={{gap:6}}>
+          {onNewLead&&<Btn sm variant="subtle" onClick={onNewLead}>⚡ محادثة</Btn>}
+          <Btn sm onClick={onNew}><Ic d={I.plus} s={15}/> مشروع</Btn>
+        </Row>
       </Row>
-      {projects.length===0
-        ?<Card style={{textAlign:"center",padding:52}}><div style={{fontSize:48,marginBottom:10}}>🗂️</div><Btn onClick={onNew} style={{marginTop:8}}><Ic d={I.plus} s={15}/> مشروع جديد</Btn></Card>
-        :projects.map(p=>{
-          const exp=p.expenses||[];
-          const spent=exp.filter(e=>e.paid&&!e.returned).reduce((s,e)=>s+e.amount,0);
-          const unpaid=exp.filter(e=>!e.paid&&!e.returned).reduce((s,e)=>s+e.amount,0);
-          const ov=spent>(Number(p.custody)||0); const pc=p.custody>0?(spent/p.custody)*100:0;
-          const mc=(p.teamMembers||[]).length;
-          return (
-            <Card key={p.id} onClick={()=>onOpen(p.id)} style={{marginBottom:13}}>
-              {/* Header */}
-              <Row style={{justifyContent:"space-between",marginBottom:6,alignItems:"flex-start"}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:800,fontSize:15,color:T.text,marginBottom:4}}>{p.name}</div>
-                  <Row style={{gap:6,flexWrap:"wrap"}}>
-                    {p.short_id&&<span style={{fontSize:10,color:T.accent,fontFamily:"monospace",fontWeight:700,background:T.accent+"12",padding:"2px 6px",borderRadius:6}}>{p.short_id}</span>}
-                    {p.producer&&<span style={{fontSize:11,color:T.muted}}>{p.producer}</span>}
-                    {mc>0&&<span style={{fontSize:11,color:T.muted}}>👥 {mc}</span>}
-                  </Row>
-                </div>
-                <Ic d={I.chevron} s={18} c={T.muted}/>
-              </Row>
-              {/* Status badges */}
-              <Row style={{gap:6,marginBottom:10,flexWrap:"wrap"}}>
-                <StatusBadge statusId={p.status||"pricing"}/>
-                {p.financeStatus&&<StatusBadge statusId={p.financeStatus}/>}
-                {p.deliveryDate&&<span style={{fontSize:11,color:T.muted,display:"flex",alignItems:"center",gap:3}}>📅 {p.deliveryDate}</span>}
-              </Row>
-              {/* Stepper mini */}
-              <div style={{overflowX:"auto",marginBottom:10,paddingBottom:2}}>
-                <div style={{display:"flex",alignItems:"center",gap:0,minWidth:"max-content"}}>
-                  {PROJECT_STATUSES.filter(s=>s.group==="work").map((s,i,arr)=>{
-                    const ci=PROJECT_STATUSES.filter(s=>s.group==="work").findIndex(x=>x.id===(p.status||"pricing"));
-                    const done=i<ci; const active=i===ci;
-                    return(<div key={s.id} style={{display:"flex",alignItems:"center"}}>
-                      <div style={{width:20,height:20,borderRadius:999,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,background:active?s.color:done?s.color+"33":T.card2,border:`1.5px solid ${active||done?s.color:T.border}`,opacity:done||active?1:0.35,transition:"all .2s"}}>
-                        {done?<span style={{fontSize:9,color:s.color}}>✓</span>:<span style={{fontSize:10}}>{s.emoji}</span>}
-                      </div>
-                      {i<arr.length-1&&<div style={{width:10,height:1.5,background:done?s.color:T.border,flexShrink:0}}/>}
-                    </div>);
-                  })}
-                </div>
-              </div>
-              {/* Financials */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:10}}>
-                {[["💰 الميزانية",fmt(p.budget),T.accent],["🤝 العهدة",fmt(p.custody),T.accent],["✓ المدفوع",fmt(spent),ov?T.warnText:T.okText]].map(([l,v,c])=>(
-                  <div key={l} style={{background:T.card2,borderRadius:12,padding:"9px 10px"}}>
-                    <div style={{fontSize:10,color:T.muted,fontWeight:600,marginBottom:2}}>{l}</div>
-                    <div style={{fontSize:12,fontWeight:800,color:c}}>{v}</div>
+
+      {/* Filter chips */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:16}}>
+        {[["all","الكل",counts.all,"#8A8A8A"],
+          ["talk","💬 محادثة",counts.talk,"#8A8A8A"],
+          ["quoted","💰 تسعيرة",counts.quoted,"#D4A017"],
+          ["active","🎬 نشط",counts.active,"#28A870"],
+          ["done","✅ منتهي",counts.done,"#3A8CC4"]
+        ].map(([id,lbl,cnt,color])=>(
+          <button key={id} className="press" onClick={()=>setFilterStage(id)}
+            style={{background:filterStage===id?color+"22":T.card2,border:`1.5px solid ${filterStage===id?color:T.border}`,borderRadius:12,padding:"10px 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,fontFamily:"Tajawal,sans-serif"}}>
+            <div style={{fontSize:11,color:filterStage===id?color:T.textS,fontWeight:700}}>{lbl}</div>
+            <div style={{fontSize:16,color:filterStage===id?color:T.text,fontWeight:900}}>{cnt}</div>
+          </button>
+        ))}
+      </div>
+
+      {filtered.length===0&&projects.length===0
+        ?<Card style={{textAlign:"center",padding:52}}>
+          <div style={{fontSize:48,marginBottom:10}}>🗂️</div>
+          <div style={{fontSize:13,color:T.muted,marginBottom:12}}>لا يوجد مشاريع بعد</div>
+          <Row style={{gap:8,justifyContent:"center"}}>
+            {onNewLead&&<Btn variant="subtle" onClick={onNewLead}>⚡ محادثة جديدة</Btn>}
+            <Btn onClick={onNew}><Ic d={I.plus} s={15}/> مشروع كامل</Btn>
+          </Row>
+        </Card>
+        :filterStage!=="all"
+          ?filtered.map(renderCard)
+          :(<>
+            {/* Grouped view when "الكل" is selected */}
+            {WORK_STAGES.filter(s=>s.id!=="done").map(s=>{
+              const inStage=filtered.filter(p=>p.status===s.id);
+              if(!inStage.length) return null;
+              return (
+                <div key={s.id} style={{marginBottom:16}}>
+                  <div style={{fontSize:11,color:s.color,fontFamily:"'DM Mono',monospace",letterSpacing:"0.16em",textTransform:"uppercase",fontWeight:700,margin:"4px 0 8px"}}>
+                    {s.emoji} {s.label} · {inStage.length}
                   </div>
-                ))}
+                  {inStage.map(renderCard)}
+                </div>
+              );
+            })}
+            {/* Done section — collapsed by default */}
+            {counts.done>0&&(
+              <div style={{marginTop:8}}>
+                <button className="press" onClick={()=>setShowDone(!showDone)}
+                  style={{width:"100%",background:T.card2,border:`1px solid ${T.border}`,borderRadius:11,padding:"10px 14px",cursor:"pointer",fontFamily:"Tajawal,sans-serif",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{fontSize:12,color:T.textS,fontWeight:700}}>✅ منتهي ({counts.done})</span>
+                  <span style={{fontSize:14,color:T.muted}}>{showDone?"▲":"▼"}</span>
+                </button>
+                {showDone&&<div style={{marginTop:10}}>{filtered.filter(p=>p.status==="done").map(renderCard)}</div>}
               </div>
-              <ProgressBar pct={pc} over={ov} h={6}/>
-              <Row style={{justifyContent:"space-between",marginTop:6,fontSize:11}}>
-                <span style={{color:T.muted}}>{Math.round(pc||0)}%</span>
-                <Row style={{gap:6}}>
-                  {unpaid>0&&<Badge label={`⏳ ${fmt(unpaid)}`} color={T.accent}/>}
-                  <Badge label={ov?"⚠ تجاوز":"✓ ضمن الحد"} color={ov?T.warnText:T.okText} bg={ov?T.warn+"20":T.ok+"20"}/>
-                </Row>
-              </Row>
-            </Card>
-          );
-        })}
+            )}
+          </>)}
     </div>
   );
 }
@@ -4028,7 +4341,7 @@ function OverviewTab({projects}) {
       <div style={{fontSize:12,color:T.muted,fontWeight:600,marginBottom:8}}>المشاريع حسب الحالة</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         {PROJECT_STATUSES.filter(s=>s.group==="work").map(s=>{
-          const count=projects.filter(p=>(p.status||"pricing")===s.id).length;
+          const count=projects.filter(p=>(p.status||"talk")===s.id).length;
           if(!count) return null;
           return(<div key={s.id} style={{background:s.color+"18",border:`1.5px solid ${s.color}44`,borderRadius:12,padding:"8px 12px",display:"flex",alignItems:"center",gap:6}}>
             <span style={{fontSize:14}}>{s.emoji}</span>
@@ -4664,8 +4977,11 @@ function SettingsTab({themeId,onTheme,profile,onProfile,banks,onBanks,projects,o
   const [rpTheme,setRpTheme]=useState("dark");
   const [rpIban,setRpIban]=useState("none");
   const [rpBank,setRpBank]=useState(0);
-  const [rpKind,setRpKind]=useState("financial"); // financial | attendance
+  const [rpKind,setRpKind]=useState("financial"); // financial | attendance | lifecycle
   const [rpAttProj,setRpAttProj]=useState("");
+  const [rpLifeMode,setRpLifeMode]=useState("single"); // single | multi
+  const [rpLifeProj,setRpLifeProj]=useState("");
+  const [rpLifeSelected,setRpLifeSelected]=useState([]);
   const [filesTab,setFilesTab]=useState("reports");
   const [invSubTab,setInvSubTab]=useState("saved");
   const [exportProjId,setExportProjId]=useState("");
@@ -4896,6 +5212,124 @@ ${ibanSection}${rows}${notesSection}
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([html],{type:"text/html"}));
     a.download=`تقرير-حضور-${project.name}-${today()}.html`;
+    a.click();
+  };
+
+  const genLifecycleReport=(mode,projs)=>{
+    if(!projs||!projs.length){ alert("اختاري مشروع على الأقل"); return; }
+    const FC=MWAY_EXPORT[rpTheme]||MWAY_EXPORT.dark;
+    const bg=FC.bg, cardBg=FC.card, card2=FC.card2, border=FC.border;
+    const textMain=FC.text, textMuted=FC.muted, accent=FC.accent;
+    const headerBg=FC.headerBg, headerText=FC.headerText;
+
+    const fmtDate=(iso)=>{ try{return new Date(iso).toLocaleDateString("ar-SA",{year:"numeric",month:"short",day:"numeric"});}catch(e){return iso||"—";} };
+    const stageMeta=(id)=>PROJECT_STATUSES.find(s=>s.id===id)||{emoji:"❓",label:id,color:accent};
+
+    const buildProjectSection=(p)=>{
+      const hist=Array.isArray(p.stageHistory)?p.stageHistory:[];
+      const currentStage=normalizeLegacyStatus(p.status);
+      const totalDays=totalLifecycleDays(p);
+
+      // Build timeline items
+      let timelineHTML='';
+      WORK_STAGES.forEach((s,idx)=>{
+        const entered=hist.find(h=>h.stage===s.id);
+        const nextEntered=hist.find(h=>{const o=STAGE_ORDER[h.stage]||0; return o>STAGE_ORDER[s.id];});
+        const isCurrent=currentStage===s.id;
+        const isReached=!!entered;
+        let daysHere=0;
+        if(entered){
+          const endDate=nextEntered?nextEntered.at:(isCurrent?new Date().toISOString():entered.at);
+          daysHere=daysBetween(entered.at,endDate);
+        }
+        timelineHTML+='<div style="display:flex;gap:14px;margin-bottom:14px;opacity:'+(isReached?1:0.4)+';">'+
+          '<div style="position:relative;width:32px;flex-shrink:0;">'+
+            '<div style="width:32px;height:32px;border-radius:50%;background:'+(isReached?s.color:card2)+';border:2px solid '+(isReached?s.color:border)+';display:flex;align-items:center;justify-content:center;font-size:16px;">'+s.emoji+'</div>'+
+            (idx<WORK_STAGES.length-1?'<div style="position:absolute;left:50%;top:32px;width:2px;height:36px;margin-left:-1px;background:'+(isReached?s.color+'66':border)+';"></div>':'')+
+          '</div>'+
+          '<div style="flex:1;">'+
+            '<div style="font-size:13px;font-weight:800;color:'+(isReached?s.color:textMuted)+';">'+s.label+
+              (isCurrent?' <span style="font-size:9px;background:'+s.color+';color:#fff;padding:2px 6px;border-radius:5px;letter-spacing:0.1em;font-family:\'DM Mono\',monospace;">الحالية</span>':'')+
+            '</div>'+
+            (entered?'<div style="font-size:11px;color:'+textMuted+';margin-top:3px;">📅 '+fmtDate(entered.at)+'</div>':'')+
+            (daysHere>0?'<div style="font-size:11px;color:'+FC.textS+';margin-top:2px;font-family:\'DM Mono\',monospace;">⏱ '+daysHere+' يوم'+(isCurrent?' (حتى الآن)':'')+'</div>':'')+
+          '</div>'+
+        '</div>';
+      });
+
+      const budget=Number(p.budget||0), custody=Number(p.custody||0);
+      const spent=(p.expenses||[]).filter(e=>e.paid&&!e.returned).reduce((s,e)=>s+e.amount,0);
+
+      return '<div style="background:'+cardBg+';border:1.5px solid '+border+';border-radius:18px;padding:20px 22px;margin-bottom:18px;page-break-inside:avoid;">'+
+        '<div style="font-size:20px;font-weight:900;color:'+textMain+';margin-bottom:6px;">'+escapeHtml(p.name)+'</div>'+
+        (p.producer?'<div style="font-size:13px;color:'+textMain+';margin-bottom:4px;">👤 '+escapeHtml(p.producer)+'</div>':'')+
+        (p.firstContactDate?'<div style="font-size:11px;color:'+textMuted+';margin-bottom:14px;">📅 تواصل أول: '+fmtDate(p.firstContactDate)+'</div>':'')+
+        (p.description?'<div style="background:'+card2+';border-right:3px solid '+accent+';border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:'+textMain+';line-height:1.7;white-space:pre-wrap;" dir="auto">'+escapeHtml(p.description)+'</div>':'')+
+        // Timeline
+        '<div style="margin-bottom:14px;">'+timelineHTML+'</div>'+
+        // Total
+        '<div style="background:'+accent+'18;border:1.5px solid '+accent+'55;border-radius:12px;padding:12px 14px;text-align:center;margin-bottom:'+(budget||spent?12:0)+'px;">'+
+          '<div style="font-size:10px;color:'+accent+';font-family:\'DM Mono\',monospace;letter-spacing:0.14em;font-weight:700;margin-bottom:4px;">إجمالي دورة الحياة</div>'+
+          '<div style="font-size:28px;font-weight:900;color:'+accent+';">'+totalDays+' <span style="font-size:14px;color:'+textMuted+';">يوم</span></div>'+
+        '</div>'+
+        // Financial summary if any
+        (budget||spent?'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">'+
+          '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:16px;font-weight:800;color:'+textMain+';">'+fmt(budget)+'</div><div style="font-size:10px;color:'+textMuted+';margin-top:2px;">💰 الميزانية</div></div>'+
+          '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:16px;font-weight:800;color:'+textMain+';">'+fmt(custody)+'</div><div style="font-size:10px;color:'+textMuted+';margin-top:2px;">🤝 العهدة</div></div>'+
+          '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:16px;font-weight:800;color:'+(spent>custody?'#E57373':accent)+';">'+fmt(spent)+'</div><div style="font-size:10px;color:'+textMuted+';margin-top:2px;">✓ المدفوع</div></div>'+
+        '</div>':'')+
+      '</div>';
+    };
+
+    // Comparison chart for multi mode
+    let comparisonHTML='';
+    if(mode==="multi"&&projs.length>1){
+      const maxDays=Math.max.apply(null,projs.map(p=>totalLifecycleDays(p)||0),1);
+      const barsHTML=projs.slice(0,10).map(p=>{
+        const days=totalLifecycleDays(p);
+        const pct=maxDays?Math.round(days*100/maxDays):0;
+        return '<div style="margin-bottom:10px;">'+
+          '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;"><span style="color:'+textMain+';font-weight:700;">'+escapeHtml(p.name)+'</span><span style="color:'+textMuted+';font-family:\'DM Mono\',monospace;">'+days+' يوم</span></div>'+
+          '<div style="height:12px;background:'+card2+';border-radius:6px;overflow:hidden;"><div style="width:'+pct+'%;height:100%;background:'+accent+';"></div></div>'+
+        '</div>';
+      }).join('');
+      const avg=projs.reduce((s,p)=>s+(totalLifecycleDays(p)||0),0)/projs.length;
+      const fastest=projs.reduce((a,b)=>(totalLifecycleDays(a)||Infinity)<(totalLifecycleDays(b)||Infinity)?a:b);
+      const slowest=projs.reduce((a,b)=>(totalLifecycleDays(a)||0)>(totalLifecycleDays(b)||0)?a:b);
+      comparisonHTML='<div style="background:'+cardBg+';border:1.5px solid '+border+';border-radius:18px;padding:20px 22px;margin-bottom:18px;">'+
+        '<div style="font-size:16px;font-weight:900;color:'+textMain+';margin-bottom:14px;">📊 مقارنة دورات الحياة</div>'+
+        barsHTML+
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid '+border+';">'+
+          '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:20px;font-weight:900;color:'+accent+';">'+Math.round(avg)+'</div><div style="font-size:10px;color:'+textMuted+';margin-top:2px;">متوسط الأيام</div></div>'+
+          '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:14px;font-weight:800;color:#4CAF50;">'+escapeHtml(fastest.name)+'</div><div style="font-size:10px;color:'+textMuted+';margin-top:2px;">⚡ الأسرع ('+totalLifecycleDays(fastest)+' يوم)</div></div>'+
+          '<div style="background:'+card2+';border-radius:10px;padding:10px;text-align:center;"><div style="font-size:14px;font-weight:800;color:#E57373;">'+escapeHtml(slowest.name)+'</div><div style="font-size:10px;color:'+textMuted+';margin-top:2px;">🐌 الأبطأ ('+totalLifecycleDays(slowest)+' يوم)</div></div>'+
+        '</div>'+
+      '</div>';
+    }
+
+    const titleLabel=mode==="single"?"دورة حياة المشروع":"دورات حياة المشاريع";
+    const html='<!DOCTYPE html><html dir="rtl" lang="ar"><head>'+
+      '<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>'+
+      '<title>'+escapeHtml(titleLabel)+' — '+escapeHtml(projs.map(p=>p.name).join(", "))+'</title>'+
+      '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'+
+      '<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">'+
+      '<style>html,body{background:'+bg+';margin:0;padding:0;font-family:\'Tajawal\',sans-serif;color:'+textMain+';direction:rtl;}[dir="ltr"]{unicode-bidi:isolate;}@media print{body{padding:20px !important;}}</style>'+
+      '</head><body style="padding:28px 24px;background:'+bg+';">'+
+      // Header
+      '<div style="background:'+headerBg+';color:'+headerText+';border-radius:20px;padding:22px 26px;margin-bottom:20px;">'+
+        '<div style="font-size:11px;letter-spacing:0.2em;opacity:0.75;font-family:\'DM Mono\',monospace;text-transform:uppercase;margin-bottom:6px;">Lifecycle Report</div>'+
+        '<div style="font-size:22px;font-weight:900;">🔄 '+escapeHtml(titleLabel)+'</div>'+
+        '<div style="font-size:13px;margin-top:4px;opacity:0.85;">'+projs.length+' مشروع · '+new Date().toLocaleDateString("ar-SA",{year:"numeric",month:"long",day:"numeric"})+'</div>'+
+      '</div>'+
+      comparisonHTML+
+      projs.map(buildProjectSection).join('')+
+      // Footer
+      '<div style="text-align:center;margin-top:24px;padding-top:16px;border-top:1px solid '+border+';font-size:10px;color:'+textMuted+';font-family:\'DM Mono\',monospace;letter-spacing:0.14em;">Generated by m-way app</div>'+
+      '</body></html>';
+
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([html],{type:"text/html"}));
+    a.download=(mode==="single"?"دورة-حياة-"+projs[0].name:"مقارنة-دورات-حياة-"+projs.length)+"-"+today()+".html";
     a.click();
   };
 
@@ -5135,23 +5569,67 @@ ${ibanSection}${rows}${notesSection}
       </Row>
       {filesTab==="reports"&&<div style={{display:"flex",flexDirection:"column",gap:14}}>
         {/* Report type selector */}
-        <Row style={{gap:8}}>
-          {[["financial","💰 تقرير المشروع"],["attendance","🎪 تقرير الحضور"]].map(([v,l])=>(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+          {[["financial","💰 مالي"],["attendance","🎪 حضور"],["lifecycle","🔄 دورة الحياة"]].map(([v,l])=>(
             <div key={v} className="press" onClick={()=>setRpKind(v)}
-              style={{flex:1,padding:"12px",borderRadius:12,
+              style={{padding:"12px 6px",borderRadius:12,
               border:"1.5px solid "+(rpKind===v?T.accent+"66":T.border),
               background:rpKind===v?T.accent+"18":T.card2,cursor:"pointer",textAlign:"center"}}>
-              <div style={{fontSize:13,fontWeight:700,color:rpKind===v?T.accent:T.text}}>{l}</div>
+              <div style={{fontSize:12,fontWeight:700,color:rpKind===v?T.accent:T.text}}>{l}</div>
             </div>
           ))}
-        </Row>
-        {rpKind==="financial"?<Sel label="المشروع" value={rpProj} onChange={e=>setRpProj(e.target.value)}>
+        </div>
+        {rpKind==="financial"&&<Sel label="المشروع" value={rpProj} onChange={e=>setRpProj(e.target.value)}>
           <option value="all">كل المشاريع ({projects.length})</option>
           {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-        </Sel>:<Sel label="مشروع الفعالية" value={rpAttProj} onChange={e=>setRpAttProj(e.target.value)}>
+        </Sel>}
+        {rpKind==="attendance"&&<Sel label="مشروع الفعالية" value={rpAttProj} onChange={e=>setRpAttProj(e.target.value)}>
           <option value="">— اختاري مشروعاً —</option>
           {projects.filter(p=>p.hostingEnabled).map(p=>{const c=EVENT_CATEGORIES.find(x=>x.id===p.eventCategory);return <option key={p.id} value={p.id}>{c?c.e+" ":""}{p.name}</option>;})}
         </Sel>}
+        {rpKind==="lifecycle"&&(
+          <div>
+            <label style={{fontSize:11,color:T.muted,fontWeight:600,display:"block",marginBottom:6}}>نوع التقرير</label>
+            <Row style={{gap:6,marginBottom:12}}>
+              {[["single","مشروع واحد"],["multi","عدة مشاريع"]].map(([v,l])=>(
+                <button key={v} className="press" onClick={()=>setRpLifeMode(v)}
+                  style={{flex:1,background:rpLifeMode===v?T.accent+"22":T.card2,border:`1.5px solid ${rpLifeMode===v?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",fontSize:12,fontWeight:700,color:rpLifeMode===v?T.accent:T.text,cursor:"pointer",fontFamily:"Tajawal,sans-serif"}}>{l}</button>
+              ))}
+            </Row>
+            {rpLifeMode==="single"?(
+              <Sel label="المشروع" value={rpLifeProj} onChange={e=>setRpLifeProj(e.target.value)}>
+                <option value="">— اختاري مشروعاً —</option>
+                {projects.map(p=>{const s=PROJECT_STATUSES.find(x=>x.id===normalizeLegacyStatus(p.status));return <option key={p.id} value={p.id}>{(s?s.emoji+" ":"")+p.name}</option>;})}
+              </Sel>
+            ):(
+              <div>
+                <label style={{fontSize:11,color:T.muted,fontWeight:600,display:"block",marginBottom:6}}>اختاري المشاريع ({rpLifeSelected.length})</label>
+                <Row style={{gap:6,marginBottom:8}}>
+                  <button className="press" onClick={()=>setRpLifeSelected(projects.map(p=>p.id))}
+                    style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:8,padding:"5px 10px",fontSize:10,color:T.textS,cursor:"pointer",fontWeight:600}}>اختر الكل</button>
+                  {rpLifeSelected.length>0&&<button className="press" onClick={()=>setRpLifeSelected([])}
+                    style={{background:"transparent",border:"none",color:T.muted,fontSize:10,cursor:"pointer",fontWeight:600}}>✕ مسح</button>}
+                </Row>
+                <div style={{maxHeight:220,overflowY:"auto",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,padding:6}}>
+                  {projects.map(p=>{
+                    const sel=rpLifeSelected.includes(p.id);
+                    const s=PROJECT_STATUSES.find(x=>x.id===normalizeLegacyStatus(p.status));
+                    return (
+                      <div key={p.id} className="press" onClick={()=>setRpLifeSelected(prev=>sel?prev.filter(x=>x!==p.id):[...prev,p.id])}
+                        style={{background:sel?T.accent+"18":"transparent",border:`1px solid ${sel?T.accent:T.border}`,borderRadius:8,padding:"7px 10px",marginBottom:4,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${sel?T.accent:T.border}`,background:sel?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          {sel&&<span style={{color:"#fff",fontSize:11,fontWeight:900,lineHeight:1}}>✓</span>}
+                        </div>
+                        <div style={{flex:1,fontSize:12,color:T.text,fontWeight:700}}>{s?s.emoji+" ":""}{p.name}</div>
+                        <span style={{fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace"}}>{totalLifecycleDays(p)} يوم</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {rpKind==="attendance"&&projects.filter(p=>p.hostingEnabled).length===0&&(
           <div style={{background:T.card2,border:`1.5px dashed ${T.border}`,borderRadius:12,padding:"14px 16px",textAlign:"center"}}>
             <div style={{fontSize:12,color:T.muted}}>لا توجد مشاريع فعاليات — فعّلي "يشمل استضافة" في أي مشروع أولاً</div>
@@ -5200,9 +5678,17 @@ ${ibanSection}${rows}${notesSection}
         </div>
         </div>
         <SmartTextarea label="ملاحظات التقرير (اختياري)" value={rpNotes} onChange={e=>setRpNotes(e.target.value)} rows={3} placeholder={"اضغط - ثم Enter للنقاط\n١- ثم Enter للترقيم التلقائي"}/>
-        {rpKind==="financial"
-          ?(projects.length>0&&<Btn full onClick={genReport}><Ic d={I.download} s={17}/> تحميل التقرير المالي</Btn>)
-          :<Btn full disabled={!rpAttProj} onClick={()=>genAttendanceReport(projects.find(p=>p.id===rpAttProj))}><Ic d={I.download} s={17}/> تحميل تقرير الحضور</Btn>}
+        {rpKind==="financial"&&projects.length>0&&<Btn full onClick={genReport}><Ic d={I.download} s={17}/> تحميل التقرير المالي</Btn>}
+        {rpKind==="attendance"&&<Btn full disabled={!rpAttProj} onClick={()=>genAttendanceReport(projects.find(p=>p.id===rpAttProj))}><Ic d={I.download} s={17}/> تحميل تقرير الحضور</Btn>}
+        {rpKind==="lifecycle"&&<Btn full disabled={rpLifeMode==="single"?!rpLifeProj:!rpLifeSelected.length} onClick={()=>{
+          if(rpLifeMode==="single"){
+            const p=projects.find(x=>x.id===rpLifeProj);
+            if(p) genLifecycleReport("single",[p]);
+          } else {
+            const list=projects.filter(x=>rpLifeSelected.includes(x.id));
+            if(list.length) genLifecycleReport("multi",list);
+          }
+        }}><Ic d={I.download} s={17}/> تحميل تقرير دورة الحياة</Btn>}
       </div>}
       {filesTab==="invoices"&&<div>
         {/* Sub tabs: فواتير مستقلة / فاتورة مشروع */}
@@ -6777,7 +7263,7 @@ function AudienceImportModal({existing,onClose,onImport}){
 /* ══════════════════════════════════════
    INVITATIONS — TAB + PICKER MODAL
 ══════════════════════════════════════ */
-function InvitationsTab({project,audience,setAudience,invitations,setInvitations,surveyQuestions,setSurveyQuestions,surveyResponses,setSurveyResponses,customInterests,customCities,showToast}){
+function InvitationsTab({project,audience,setAudience,invitations,setInvitations,surveyQuestions,setSurveyQuestions,surveyResponses,setSurveyResponses,customInterests,customCities,showToast,autoAdvance=()=>{}}){
   const T=useT();
   const [pickerOpen,setPickerOpen]=useState(false);
   const [searchText,setSearchText]=useState("");
@@ -6842,6 +7328,8 @@ function InvitationsTab({project,audience,setAudience,invitations,setInvitations
       setInvitations(prev=>[...prev,...rows]);
       setPickerOpen(false);
       showToast&&showToast(`تمت إضافة ${rows.length} شخص ✓`);
+      // Auto-advance to active on first invitee added
+      if(rows.length>0) autoAdvance(project.id,"active");
     }catch(e){ alert("فشل الإضافة: "+(e.message||e)); }
   };
 
@@ -8004,6 +8492,7 @@ function DirectorApp({onLogout,onThemeChange}) {
   const [tab,setTab]=useState("home");
   const [openId,setOpenId]=useState(null);
   const [showNew,setShowNew]=useState(false);
+  const [showNewLead,setShowNewLead]=useState(false);
   const [showInv,setShowInv]=useState(false);
   const [editInv,setEditInv]=useState(null);
   const [savedInvs,setSavedInvs]=useState([]);
@@ -8070,8 +8559,11 @@ function DirectorApp({onLogout,onThemeChange}) {
           id:p.id, short_id:p.short_id, name:p.name, producer:p.producer||"",
           budget:Number(p.budget||0), custody:Number(p.custody||0),
           myDaily:Number(p.my_daily||0), myDailyCalc:p.my_daily_calc||{}, createdAt:p.created_at,
-          status:p.status||"pricing", financeStatus:p.finance_status||null,
+          status:normalizeLegacyStatus(p.status), financeStatus:p.finance_status||null,
           startDate:p.start_date||"", deliveryDate:p.delivery_date||"",
+          firstContactDate:p.first_contact_date||null,
+          description:p.description||"",
+          stageHistory:Array.isArray(p.stage_history)?p.stage_history:(p.stage_history?JSON.parse(p.stage_history):[]),
           moodboardName:p.moodboard_name||null, moodboardFile:p.moodboard_file||null, moodboardDesc:p.moodboard_desc||"",
           hostingEnabled:!!p.hosting_enabled, eventCategory:p.event_category||null,
           expenses:expRows.filter(e=>e.project_id===p.id).map(e=>({...e,amount:Number(e.amount||0),member_id:e.member_id||null})),
@@ -8106,9 +8598,11 @@ function DirectorApp({onLogout,onThemeChange}) {
   const addProject=async(p)=>{
     setSaving(true);
     try{
-      const [row]=await sb.post("projects",{id:p.id,short_id:p.short_id,name:p.name,producer:p.producer,budget:p.budget,custody:p.custody,my_daily:p.myDaily,my_daily_calc:p.myDailyCalc,created_at:p.createdAt,status:p.status||"pricing",finance_status:p.financeStatus||null,start_date:p.startDate||null,delivery_date:p.deliveryDate||null,hosting_enabled:!!p.hostingEnabled,event_category:p.eventCategory||null});
-      setProjects(ps=>[...ps,{...p,id:row?.id||p.id}]);
-      setShowNew(false); setOpenId(row?.id||p.id);
+      const initStage=p.status||"talk";
+      const initHistory=Array.isArray(p.stageHistory)&&p.stageHistory.length ? p.stageHistory : [{stage:initStage,at:new Date().toISOString()}];
+      const [row]=await sb.post("projects",{id:p.id,short_id:p.short_id,name:p.name,producer:p.producer,budget:p.budget,custody:p.custody,my_daily:p.myDaily,my_daily_calc:p.myDailyCalc,created_at:p.createdAt,status:initStage,finance_status:p.financeStatus||null,start_date:p.startDate||null,delivery_date:p.deliveryDate||null,first_contact_date:p.firstContactDate||null,description:p.description||null,stage_history:initHistory,hosting_enabled:!!p.hostingEnabled,event_category:p.eventCategory||null});
+      setProjects(ps=>[...ps,{...p,id:row?.id||p.id,status:initStage,stageHistory:initHistory}]);
+      setShowNew(false); setShowNewLead(false); setOpenId(row?.id||p.id);
       showToast("تم إنشاء المشروع ✓");
     }catch{showToast("خطأ في الحفظ","err");}
     setSaving(false);
@@ -8116,6 +8610,21 @@ function DirectorApp({onLogout,onThemeChange}) {
 
   const updateProject=p=>{
     setProjects(ps=>ps.map(x=>x.id===p.id?p:x));
+  };
+  // Auto-advance a project's stage — only moves forward, never backward
+  const autoAdvance=async(projectId,targetStage)=>{
+    const p=projects.find(x=>x.id===projectId);
+    if(!p) return;
+    const currentOrder=STAGE_ORDER[normalizeLegacyStatus(p.status)]||0;
+    const targetOrder=STAGE_ORDER[targetStage]||0;
+    if(targetOrder<=currentOrder) return; // never move backward
+    const result=await advanceProjectStage(p,targetStage,sb);
+    if(result.changed){
+      const fromLabel=(PROJECT_STATUSES.find(s=>s.id===result.from)||{}).label||result.from;
+      const toLabel=(PROJECT_STATUSES.find(s=>s.id===result.to)||{}).label||result.to;
+      setProjects(ps=>ps.map(x=>x.id===projectId?{...x,status:result.to,stageHistory:result.history}:x));
+      showToast("انتقل إلى "+toLabel+" (من "+fromLabel+")");
+    }
   };
   const reloadProject=async(pid)=>{
     try{
@@ -8163,12 +8672,12 @@ function DirectorApp({onLogout,onThemeChange}) {
       <style>{gStyles}</style>
       <Toast msg={toast.msg} type={toast.type}/>
       {activeProject?(
-        <DirectorProjectPage project={activeProject} onUpdate={updateProject} onDelete={deleteProject} onBack={()=>setOpenId(null)} showToast={showToast} todos={todos} setTodos={setTodos} projectsList={projects} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities}/>
+        <DirectorProjectPage project={activeProject} onUpdate={updateProject} onDelete={deleteProject} onBack={()=>setOpenId(null)} showToast={showToast} todos={todos} setTodos={setTodos} projectsList={projects} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} autoAdvance={autoAdvance} savedQuotes={savedQuotes}/>
       ):(
         <>
           <div style={{paddingBottom:80,overflowY:"auto",minHeight:"100vh"}}>
-            {tab==="home"    &&<HomeTab projects={projects} unreadCount={unreadCount} todoCount={todos.filter(t=>!t.done).length} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewInvoice={()=>{setEditInv(null);setShowInv(true);}} onNotifications={()=>setShowNotif(true)} onTodos={()=>setShowTodos(true)} onGlobalSearch={()=>setShowGlobalSearch(true)}/>}
-            {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
+            {tab==="home"    &&<HomeTab projects={projects} unreadCount={unreadCount} todoCount={todos.filter(t=>!t.done).length} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} onNewInvoice={()=>{setEditInv(null);setShowInv(true);}} onNotifications={()=>setShowNotif(true)} onTodos={()=>setShowTodos(true)} onGlobalSearch={()=>setShowGlobalSearch(true)}/>}
+            {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
             {tab==="overview"&&<OverviewTab projects={projects}/>}
             {tab==="income"&&<IncomeTab projects={projects}/>}
             {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
@@ -8189,11 +8698,18 @@ function DirectorApp({onLogout,onThemeChange}) {
             })}
           </nav>
           {showNew&&<NewProjectModal onSave={addProject} onClose={()=>setShowNew(false)}/>}
+          {showNewLead&&<QuickAddLeadModal onSave={addProject} onClose={()=>setShowNewLead(false)}/>}
       {showQuote&&<div style={{position:"fixed",inset:0,zIndex:201,overflowY:"auto"}}>
-        <QuotationEditor quotation={editQuote} banks={banks}
-          onSave={function(q,c){setSavedQuotes(function(prev){var n=prev.find(function(i){return i.id===q.id;})?prev.map(function(i){return i.id===q.id?q:i;}):[...prev,q];saveQuotations(n);return n;});setEditQuote(q);return q;}}
+        <QuotationEditor quotation={editQuote} banks={banks} projects={projects}
+          onSave={function(q,c){
+            setSavedQuotes(function(prev){var n=prev.find(function(i){return i.id===q.id;})?prev.map(function(i){return i.id===q.id?q:i;}):[...prev,q];saveQuotations(n);return n;});
+            setEditQuote(q);
+            // Auto-advance the linked project to "quoted" stage
+            if(q.projectId){ autoAdvance(q.projectId,"quoted"); }
+            return q;
+          }}
           onClose={function(){setShowQuote(false);setEditQuote(null);}}
-          onCreateProject={function(q){setShowQuote(false);setEditQuote(null);var p={id:uid(),short_id:makeShortId(q.title||"quot"),name:q.title||"مشروع جديد",producer:"",budget:0,custody:0,myDaily:0,myDailyCalc:{},status:"pricing",financeStatus:null,startDate:q.issueDate||today(),deliveryDate:"",expenses:[],teamMembers:[],createdAt:today()};addProject(p).then(function(){showToast("تم إنشاء المشروع ✓");setOpenId(p.id);}).catch(function(){showToast("خطأ في الحفظ","err");});}}
+          onCreateProject={function(q){setShowQuote(false);setEditQuote(null);var p={id:uid(),short_id:makeShortId(q.title||"quot"),name:q.title||"مشروع جديد",producer:"",budget:0,custody:0,myDaily:0,myDailyCalc:{},status:"talk",financeStatus:null,startDate:q.issueDate||today(),deliveryDate:"",expenses:[],teamMembers:[],createdAt:today()};addProject(p).then(function(){showToast("تم إنشاء المشروع ✓");setOpenId(p.id);}).catch(function(){showToast("خطأ في الحفظ","err");});}}
         />
       </div>}
       {showInv&&<div style={{position:"fixed",inset:0,zIndex:200,overflowY:"auto"}}><InvoicePage invoice={editInv} projects={projects} banks={banks} onSave={inv=>{setSavedInvs(prev=>{const n=prev.find(i=>i.id===inv.id)?prev.map(i=>i.id===inv.id?inv:i):[...prev,inv];return n;});setEditInv(inv);}} onClose={r=>{setShowInv(false);setEditInv(null);if(r&&r.action==="added"){
@@ -8203,7 +8719,7 @@ function DirectorApp({onLogout,onThemeChange}) {
                 setProjects(prev=>prev.map(p=>p.id===r.projId?{...p,expenses:exps}:p));
               }).catch(e=>console.error("RELOAD ERR:",e.message));
               setOpenId(r.projId);
-            }else if(r&&r.action==="new"){const inv=r.inv;const p={id:uid(),short_id:makeShortId(inv.title||"inv"),name:inv.title||"مشروع جديد",producer:inv.producer||"",budget:0,custody:0,myDaily:0,myDailyCalc:{},status:"pricing",financeStatus:null,startDate:inv.date||today(),deliveryDate:"",expenses:[],teamMembers:[],createdAt:today()};addProject(p).then(()=>{inv.items.filter(i=>i.name.trim()).forEach(item=>{sb.post("expenses",{id:uid(),project_id:p.id,member_id:null,name:item.name,description:"",store:"",date:item.date||inv.date||today(),amount:parseFloat(item.amount)||0,type:item.type||"purchase",paid:false,added_by:"director"}).catch(e=>console.error("EXP POST ERR:",e.message));});// أعد تحميل expenses بعد إضافتها
+            }else if(r&&r.action==="new"){const inv=r.inv;const p={id:uid(),short_id:makeShortId(inv.title||"inv"),name:inv.title||"مشروع جديد",producer:inv.producer||"",budget:0,custody:0,myDaily:0,myDailyCalc:{},status:"talk",financeStatus:null,startDate:inv.date||today(),deliveryDate:"",expenses:[],teamMembers:[],createdAt:today()};addProject(p).then(()=>{inv.items.filter(i=>i.name.trim()).forEach(item=>{sb.post("expenses",{id:uid(),project_id:p.id,member_id:null,name:item.name,description:"",store:"",date:item.date||inv.date||today(),amount:parseFloat(item.amount)||0,type:item.type||"purchase",paid:false,added_by:"director"}).catch(e=>console.error("EXP POST ERR:",e.message));});// أعد تحميل expenses بعد إضافتها
               setTimeout(()=>{
                 sb.get("expenses","?project_id=eq."+p.id+"&order=created_at.desc").then(exps=>{
                   setProjects(prev=>prev.map(x=>x.id===p.id?{...x,expenses:exps}:x));
