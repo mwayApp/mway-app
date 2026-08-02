@@ -463,6 +463,22 @@ function ProjectStepper({statusId, financeStatusId, onChangeStatus, onChangeFina
 const TC = createContext(null);
 const useT = () => useContext(TC);
 
+// Viewport size hook — used later to switch mobile/desktop layouts
+function useViewport(){
+  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(function(){
+    var handler = function(){ setW(window.innerWidth); };
+    window.addEventListener("resize", handler);
+    return function(){ window.removeEventListener("resize", handler); };
+  }, []);
+  return {
+    width: w,
+    isMobile:  w <= 767,
+    isTablet:  w > 767 && w <= 1023,
+    isDesktop: w > 1023
+  };
+}
+
 /* ══════════════════════════════════════
    ICONS
 ══════════════════════════════════════ */
