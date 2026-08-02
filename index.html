@@ -8557,6 +8557,7 @@ function buildSurveyReportHTML(project,questions,responses,opts){
 ══════════════════════════════════════ */
 function DirectorApp({onLogout,onThemeChange}) {
   const T=useT();
+  const vp=useViewport();
   const [dirThemeId,setDirThemeId]=useState(()=>LS.get("director_theme")||"mway_dark");
   const [projects,setProjects]=useState([]);
   const [tab,setTab]=useState("home");
@@ -8745,15 +8746,50 @@ function DirectorApp({onLogout,onThemeChange}) {
         <DirectorProjectPage project={activeProject} onUpdate={updateProject} onDelete={deleteProject} onBack={()=>setOpenId(null)} showToast={showToast} todos={todos} setTodos={setTodos} projectsList={projects} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} autoAdvance={autoAdvance} savedQuotes={savedQuotes}/>
       ):(
         <>
-          <div style={{paddingBottom:80,overflowY:"auto",minHeight:"100vh"}}>
+          {/* Desktop-only top nav — horizontal tabs at the top */}
+          {vp.isDesktop&&(
+            <nav style={{background:T.card,borderBottom:`1.5px solid ${T.border}`,padding:"12px 24px",display:"flex",alignItems:"center",gap:8,position:"sticky",top:0,zIndex:50}}>
+              <div style={{display:"flex",alignItems:"center",gap:12,marginLeft:20}}>
+                <LogoMway h={22}/>
+              </div>
+              <div style={{flex:1,display:"flex",gap:4}}>
+                {[["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["settings","الإعدادات",I.settings]].map(function(item){
+                  var id=item[0], lbl=item[1], icon=item[2];
+                  var active=tab===id;
+                  return (
+                    <button key={id} className="press" onClick={function(){setTab(id);}}
+                      style={{background:active?T.accent+"18":"transparent",border:"1.5px solid "+(active?T.accent+"55":"transparent"),borderRadius:10,padding:"7px 14px",display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:active?T.accent:T.textS,fontFamily:"Tajawal,sans-serif",fontSize:13,fontWeight:active?800:600}}>
+                      <Ic d={icon} s={16} c={active?T.accent:T.textS} sw={active?2:1.5}/>
+                      <span>{lbl}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button className="press" onClick={function(){setShowGlobalSearch(true);}} title="بحث"
+                style={{width:36,height:36,borderRadius:10,background:T.card2,border:"1px solid "+T.border,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                <Ic d={I.search} s={16} c={T.textS}/>
+              </button>
+              <button className="press" onClick={function(){setShowTodos(true);}} title="المهام"
+                style={{position:"relative",width:36,height:36,borderRadius:10,background:T.card2,border:"1px solid "+T.border,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                <Ic d={I.list} s={16} c={T.textS}/>
+                {todos.filter(function(t){return !t.done;}).length>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.accent,color:"#fff",borderRadius:999,width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900}}>{todos.filter(function(t){return !t.done;}).length}</div>}
+              </button>
+              <button className="press" onClick={function(){setShowNotif(true);}} title="الإشعارات"
+                style={{position:"relative",width:36,height:36,borderRadius:10,background:T.card2,border:"1px solid "+T.border,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                <Ic d={I.bell} s={16} c={T.textS}/>
+                {unreadCount>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.warn,color:"#fff",borderRadius:999,width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900}}>{unreadCount}</div>}
+              </button>
+            </nav>
+          )}
+          <div style={{paddingBottom:vp.isDesktop?24:80,overflowY:"auto",minHeight:"100vh"}}>
             {tab==="home"    &&<HomeTab projects={projects} unreadCount={unreadCount} todoCount={todos.filter(t=>!t.done).length} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} onNewInvoice={()=>{setEditInv(null);setShowInv(true);}} onNotifications={()=>setShowNotif(true)} onTodos={()=>setShowTodos(true)} onGlobalSearch={()=>setShowGlobalSearch(true)}/>}
             {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
             {tab==="overview"&&<OverviewTab projects={projects}/>}
             {tab==="income"&&<IncomeTab projects={projects}/>}
             {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
           </div>
-          {/* Nav — NO sync dot in corner */}
-          <nav style={{position:"fixed",bottom:0,left:0,right:0,background:T.navBg,backdropFilter:"blur(20px)",borderTop:`1.5px solid ${T.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,10px)",maxWidth:480,margin:"0 auto"}}>
+          {/* Bottom nav — hidden on desktop */}
+          <nav style={{position:"fixed",bottom:0,left:0,right:0,background:T.navBg,backdropFilter:"blur(20px)",borderTop:`1.5px solid ${T.border}`,display:vp.isDesktop?"none":"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,10px)",maxWidth:480,margin:"0 auto"}}>
             {[["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["settings","الإعدادات",I.settings]].map(([id,lbl,icon])=>{
               const active=tab===id;
               return (
