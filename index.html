@@ -8819,7 +8819,7 @@ function DirectorApp({onLogout,onThemeChange}) {
           </nav>
           {showNew&&<NewProjectModal onSave={addProject} onClose={()=>setShowNew(false)}/>}
           {showNewLead&&<QuickAddLeadModal onSave={addProject} onClose={()=>setShowNewLead(false)}/>}
-      {showQuote&&<div style={{position:"fixed",inset:0,zIndex:201,overflowY:"auto"}}>
+      {showQuote&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:201,overflowY:"auto"}}>
         <QuotationEditor quotation={editQuote} banks={banks} projects={projects}
           onSave={function(q,c){
             setSavedQuotes(function(prev){var n=prev.find(function(i){return i.id===q.id;})?prev.map(function(i){return i.id===q.id?q:i;}):[...prev,q];saveQuotations(n);return n;});
@@ -8832,7 +8832,7 @@ function DirectorApp({onLogout,onThemeChange}) {
           onCreateProject={function(q){setShowQuote(false);setEditQuote(null);var p={id:uid(),short_id:makeShortId(q.title||"quot"),name:q.title||"مشروع جديد",producer:"",budget:0,custody:0,myDaily:0,myDailyCalc:{},status:"talk",financeStatus:null,startDate:q.issueDate||today(),deliveryDate:"",expenses:[],teamMembers:[],createdAt:today()};addProject(p).then(function(){showToast("تم إنشاء المشروع ✓");setOpenId(p.id);}).catch(function(){showToast("خطأ في الحفظ","err");});}}
         />
       </div>}
-      {showInv&&<div style={{position:"fixed",inset:0,zIndex:200,overflowY:"auto"}}><InvoicePage invoice={editInv} projects={projects} banks={banks} onSave={inv=>{setSavedInvs(prev=>{const n=prev.find(i=>i.id===inv.id)?prev.map(i=>i.id===inv.id?inv:i):[...prev,inv];return n;});setEditInv(inv);}} onClose={r=>{setShowInv(false);setEditInv(null);if(r&&r.action==="added"){
+      {showInv&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:200,overflowY:"auto"}}><InvoicePage invoice={editInv} projects={projects} banks={banks} onSave={inv=>{setSavedInvs(prev=>{const n=prev.find(i=>i.id===inv.id)?prev.map(i=>i.id===inv.id?inv:i):[...prev,inv];return n;});setEditInv(inv);}} onClose={r=>{setShowInv(false);setEditInv(null);if(r&&r.action==="added"){
               showToast("تمت الاضافة");
               // أعد تحميل المشاريع من Supabase
               sb.get("expenses","?project_id=eq."+r.projId+"&order=created_at.desc").then(exps=>{
