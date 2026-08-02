@@ -464,27 +464,6 @@ const TC = createContext(null);
 const useT = () => useContext(TC);
 
 /* ══════════════════════════════════════
-   VIEWPORT — mobile / tablet / desktop detection
-══════════════════════════════════════ */
-const MOBILE_MAX = 767;
-const TABLET_MAX = 1023;
-
-function useViewport(){
-  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
-  useEffect(function(){
-    var handler = function(){ setW(window.innerWidth); };
-    window.addEventListener("resize", handler);
-    return function(){ window.removeEventListener("resize", handler); };
-  }, []);
-  return {
-    width: w,
-    isMobile:  w <= MOBILE_MAX,
-    isTablet:  w > MOBILE_MAX && w <= TABLET_MAX,
-    isDesktop: w > TABLET_MAX
-  };
-}
-
-/* ══════════════════════════════════════
    ICONS
 ══════════════════════════════════════ */
 const Ic = ({d,s=22,c="currentColor",sw=1.6,fill="none"}) => (
@@ -8742,11 +8721,6 @@ function DirectorApp({onLogout,onThemeChange}) {
     </div>
   );
 
-  const vp = useViewport();
-  const NAV_ITEMS = [["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["settings","الإعدادات",I.settings]];
-  const currentNavItem = NAV_ITEMS.find(function(x){return x[0]===tab;});
-  const currentNavLabel = currentNavItem ? currentNavItem[1] : "";
-
   return (
     <>
       <style>{gStyles}</style>
@@ -8755,95 +8729,28 @@ function DirectorApp({onLogout,onThemeChange}) {
         <DirectorProjectPage project={activeProject} onUpdate={updateProject} onDelete={deleteProject} onBack={()=>setOpenId(null)} showToast={showToast} todos={todos} setTodos={setTodos} projectsList={projects} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} autoAdvance={autoAdvance} savedQuotes={savedQuotes}/>
       ):(
         <>
-          {vp.isDesktop ? (
-            /* ═════ DESKTOP LAYOUT — sidebar right + top header + main content ═════ */
-            <div style={{display:"grid",gridTemplateColumns:"1fr 240px",gridTemplateRows:"64px 1fr",gridTemplateAreas:'"header sidebar" "main sidebar"',minHeight:"100vh",background:T.bg}}>
-              {/* Top header bar */}
-              <header style={{gridArea:"header",background:T.card,borderBottom:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 24px",gap:16,position:"sticky",top:0,zIndex:50}}>
-                <div style={{flex:1,display:"flex",alignItems:"center",gap:14}}>
-                  <LogoMway h={22}/>
-                  <div style={{width:1,height:22,background:T.border}}/>
-                  <div style={{fontSize:13,color:T.textS,fontFamily:"'DM Mono',monospace",letterSpacing:"0.16em",textTransform:"uppercase"}}>
-                    {currentNavLabel}
-                  </div>
-                </div>
-                <button className="press" onClick={()=>setShowGlobalSearch(true)} title="بحث (Cmd+K)"
-                  style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,padding:"7px 14px",display:"flex",alignItems:"center",gap:8,cursor:"pointer",color:T.textS,fontSize:12,fontFamily:"Tajawal,sans-serif"}}>
-                  <Ic d={I.search} s={15} c={T.textS}/>
-                  <span>بحث</span>
-                  <span style={{background:T.card,padding:"1px 6px",borderRadius:4,fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace"}}>⌘K</span>
+          <div style={{paddingBottom:80,overflowY:"auto",minHeight:"100vh"}}>
+            {tab==="home"    &&<HomeTab projects={projects} unreadCount={unreadCount} todoCount={todos.filter(t=>!t.done).length} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} onNewInvoice={()=>{setEditInv(null);setShowInv(true);}} onNotifications={()=>setShowNotif(true)} onTodos={()=>setShowTodos(true)} onGlobalSearch={()=>setShowGlobalSearch(true)}/>}
+            {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
+            {tab==="overview"&&<OverviewTab projects={projects}/>}
+            {tab==="income"&&<IncomeTab projects={projects}/>}
+            {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
+          </div>
+          {/* Nav — NO sync dot in corner */}
+          <nav style={{position:"fixed",bottom:0,left:0,right:0,background:T.navBg,backdropFilter:"blur(20px)",borderTop:`1.5px solid ${T.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,10px)",maxWidth:480,margin:"0 auto"}}>
+            {[["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["settings","الإعدادات",I.settings]].map(([id,lbl,icon])=>{
+              const active=tab===id;
+              return (
+                <button key={id} className="press" onClick={()=>setTab(id)}
+                  style={{flex:1,background:"none",border:"none",padding:"10px 0 5px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:active?T.accent:T.muted,cursor:"pointer",fontFamily:"Tajawal,sans-serif",position:"relative"}}>
+                  {active&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:28,height:3,borderRadius:"0 0 6px 6px",background:T.accent}}/>}
+                  {id==="home"&&unreadCount>0&&<div style={{position:"absolute",top:6,right:"calc(50% - 14px)",background:T.warn,width:8,height:8,borderRadius:999}}/>}
+                  <Ic d={icon} s={20} c={active?T.accent:T.muted} sw={active?2:1.5}/>
+                  <span style={{fontSize:9,fontWeight:active?700:400}}>{lbl}</span>
                 </button>
-                <button className="press" onClick={()=>setShowTodos(true)} title="المهام"
-                  style={{position:"relative",width:38,height:38,borderRadius:10,background:T.card2,border:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-                  <Ic d={I.list} s={17} c={T.textS}/>
-                  {todos.filter(t=>!t.done).length>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.accent,color:"#fff",borderRadius:999,width:17,height:17,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900}}>{todos.filter(t=>!t.done).length>9?"9+":todos.filter(t=>!t.done).length}</div>}
-                </button>
-                <button className="press" onClick={()=>setShowNotif(true)} title="الإشعارات"
-                  style={{position:"relative",width:38,height:38,borderRadius:10,background:T.card2,border:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-                  <Ic d={I.bell} s={17} c={T.textS}/>
-                  {unreadCount>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.warn,color:"#fff",borderRadius:999,width:17,height:17,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900}}>{unreadCount>9?"9+":unreadCount}</div>}
-                </button>
-              </header>
-
-              {/* Sidebar navigation (right side, RTL) */}
-              <aside style={{gridArea:"sidebar",background:T.card,borderLeft:`1.5px solid ${T.border}`,padding:"18px 12px",display:"flex",flexDirection:"column",gap:6,position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
-                <div style={{padding:"8px 12px 14px",borderBottom:`1px solid ${T.border}`,marginBottom:8}}>
-                  <div style={{fontSize:11,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:4}}>Director</div>
-                  <div style={{fontSize:15,fontWeight:800,color:T.text}}>مجد القرشي 🌸</div>
-                </div>
-                {NAV_ITEMS.map(([id,lbl,icon])=>{
-                  const active = tab===id;
-                  return (
-                    <button key={id} className="press" onClick={()=>setTab(id)}
-                      style={{background:active?T.accent+"18":"transparent",border:`1.5px solid ${active?T.accent+"66":"transparent"}`,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",color:active?T.accent:T.textS,fontFamily:"Tajawal,sans-serif",fontSize:14,fontWeight:active?800:600,textAlign:"right",justifyContent:"flex-start"}}>
-                      <Ic d={icon} s={18} c={active?T.accent:T.textS} sw={active?2:1.5}/>
-                      <span style={{flex:1,textAlign:"right"}}>{lbl}</span>
-                    </button>
-                  );
-                })}
-                <div style={{marginTop:"auto",paddingTop:14,borderTop:`1px solid ${T.border}`}}>
-                  <button className="press" onClick={onLogout}
-                    style={{background:"transparent",border:"none",padding:"10px 14px",width:"100%",display:"flex",alignItems:"center",gap:10,cursor:"pointer",color:T.muted,fontSize:12,fontFamily:"Tajawal,sans-serif"}}>
-                    <span>🚪</span><span>تسجيل خروج</span>
-                  </button>
-                </div>
-              </aside>
-
-              {/* Main content area */}
-              <main style={{gridArea:"main",overflowY:"auto",padding:"24px 32px"}}>
-                {tab==="home"    &&<HomeTab projects={projects} unreadCount={unreadCount} todoCount={todos.filter(t=>!t.done).length} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} onNewInvoice={()=>{setEditInv(null);setShowInv(true);}} onNotifications={()=>setShowNotif(true)} onTodos={()=>setShowTodos(true)} onGlobalSearch={()=>setShowGlobalSearch(true)} isDesktop={true}/>}
-                {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv} isDesktop={true}/>}
-                {tab==="overview"&&<OverviewTab projects={projects} isDesktop={true}/>}
-                {tab==="income"&&<IncomeTab projects={projects} isDesktop={true}/>}
-                {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}} isDesktop={true}/>}
-              </main>
-            </div>
-          ) : (
-            /* ═════ MOBILE LAYOUT — original bottom nav ═════ */
-            <>
-              <div style={{paddingBottom:80,overflowY:"auto",minHeight:"100vh"}}>
-                {tab==="home"    &&<HomeTab projects={projects} unreadCount={unreadCount} todoCount={todos.filter(t=>!t.done).length} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} onNewInvoice={()=>{setEditInv(null);setShowInv(true);}} onNotifications={()=>setShowNotif(true)} onTodos={()=>setShowTodos(true)} onGlobalSearch={()=>setShowGlobalSearch(true)}/>}
-                {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
-                {tab==="overview"&&<OverviewTab projects={projects}/>}
-                {tab==="income"&&<IncomeTab projects={projects}/>}
-                {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
-              </div>
-              <nav style={{position:"fixed",bottom:0,left:0,right:0,background:T.navBg,backdropFilter:"blur(20px)",borderTop:`1.5px solid ${T.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,10px)",maxWidth:480,margin:"0 auto"}}>
-                {NAV_ITEMS.map(([id,lbl,icon])=>{
-                  const active=tab===id;
-                  return (
-                    <button key={id} className="press" onClick={()=>setTab(id)}
-                      style={{flex:1,background:"none",border:"none",padding:"10px 0 5px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:active?T.accent:T.muted,cursor:"pointer",fontFamily:"Tajawal,sans-serif",position:"relative"}}>
-                      {active&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:28,height:3,borderRadius:"0 0 6px 6px",background:T.accent}}/>}
-                      {id==="home"&&unreadCount>0&&<div style={{position:"absolute",top:6,right:"calc(50% - 14px)",background:T.warn,width:8,height:8,borderRadius:999}}/>}
-                      <Ic d={icon} s={20} c={active?T.accent:T.muted} sw={active?2:1.5}/>
-                      <span style={{fontSize:9,fontWeight:active?700:400}}>{lbl}</span>
-                    </button>
-                  );
-                })}
-              </nav>
-            </>
-          )}
+              );
+            })}
+          </nav>
           {showNew&&<NewProjectModal onSave={addProject} onClose={()=>setShowNew(false)}/>}
           {showNewLead&&<QuickAddLeadModal onSave={addProject} onClose={()=>setShowNewLead(false)}/>}
       {showQuote&&<div style={{position:"fixed",inset:0,zIndex:201,overflowY:"auto"}}>
@@ -9267,14 +9174,10 @@ function App() {
     }
   };
 
-  const vp = useViewport();
-  // Desktop: don't constrain to 480 — let the app fill wider
-  const appWidth = vp.isDesktop ? "100%" : (vp.isTablet ? 720 : 480);
-
   return (
     <TC.Provider value={T}>
       <style>{gStyles}</style>
-      <div style={{background:T.bg,minHeight:"100vh",maxWidth:appWidth,margin:"0 auto",fontFamily:"Tajawal,sans-serif",direction:"rtl"}}>
+      <div style={{background:T.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",fontFamily:"Tajawal,sans-serif",direction:"rtl"}}>
         {surveyShortId&&<SurveyPublicPage shortId={surveyShortId}/>}
         {!surveyShortId&&!role&&<LoginScreen onDirector={()=>setRole("director")} onSuperAdmin={()=>setRole("superadmin")} onMember={handleMemberLogin} onProducer={(m,p)=>{setMemberData(m);setProjectData(p);setRole("producer");}}/>}
         {!surveyShortId&&role==="onboarding"&&memberData&&<MemberOnboarding member={memberData} onDone={m=>{ setMemberData(m); setRole(m.role==="producer"?"producer":"member"); }}/>}
