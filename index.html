@@ -9122,6 +9122,7 @@ function QuestionInput({q,value,onChange}){
 }
 
 function App() {
+  const vp = useViewport();
   const [themeId,setThemeId]=useState(()=>LS.get("director_theme")||"mway_dark");
   const [role,setRole]=useState(null);
   const [memberData,setMemberData]=useState(null);
@@ -9193,7 +9194,7 @@ function App() {
   return (
     <TC.Provider value={T}>
       <style>{gStyles}</style>
-      <div style={{background:T.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",fontFamily:"Tajawal,sans-serif",direction:"rtl"}}>
+      <div style={{background:T.bg,minHeight:"100vh",maxWidth:vp.isDesktop?"100%":(vp.isTablet?720:480),margin:"0 auto",fontFamily:"Tajawal,sans-serif",direction:"rtl"}}>
         {surveyShortId&&<SurveyPublicPage shortId={surveyShortId}/>}
         {!surveyShortId&&!role&&<LoginScreen onDirector={()=>setRole("director")} onSuperAdmin={()=>setRole("superadmin")} onMember={handleMemberLogin} onProducer={(m,p)=>{setMemberData(m);setProjectData(p);setRole("producer");}}/>}
         {!surveyShortId&&role==="onboarding"&&memberData&&<MemberOnboarding member={memberData} onDone={m=>{ setMemberData(m); setRole(m.role==="producer"?"producer":"member"); }}/>}
