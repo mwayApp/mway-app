@@ -4143,32 +4143,35 @@ function SuperAdminApp({onLogout}) {
 ══════════════════════════════════════ */
 function HomeTab({projects,unreadCount,todoCount,onOpen,onNew,onNewLead,onNewInvoice,onNotifications,onTodos,onGlobalSearch}) {
   const T=useT();
+  const vp=useViewport();
   const tS=projects.reduce((s,p)=>(p.expenses||[]).filter(e=>e.paid&&!e.returned).reduce((a,e)=>a+e.amount,s),0);
   const tC=projects.reduce((s,p)=>s+(Number(p.custody)||0),0);
   const over=tS>tC; const pct=tC>0?(tS/tC)*100:0;
   return (
-    <div className="page" style={{padding:"28px 14px 0"}}>
+    <div className="page" style={{padding:vp.isDesktop?"32px 32px 0":"28px 14px 0"}}>
       <Row style={{justifyContent:"space-between",marginBottom:20,alignItems:"flex-end"}}>
         <div>
-          <div style={{marginBottom:8,opacity:0.92}}><LogoMway h={22}/></div>
-          <div style={{fontSize:24,fontWeight:600,color:T.text,fontFamily:"'DM Sans','Tajawal',sans-serif",letterSpacing:"-0.01em"}}>أهلاً مجد 🌸</div>
+          {!vp.isDesktop&&<div style={{marginBottom:8,opacity:0.92}}><LogoMway h={22}/></div>}
+          <div style={{fontSize:vp.isDesktop?32:24,fontWeight:600,color:T.text,fontFamily:"'DM Sans','Tajawal',sans-serif",letterSpacing:"-0.01em"}}>أهلاً مجد 🌸</div>
         </div>
-        <Row style={{gap:8}}>
-          <button className="press" onClick={onGlobalSearch} title="بحث"
-            style={{position:"relative",width:44,height:44,borderRadius:14,background:T.card2,border:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-            <Ic d={I.search} s={19} c={T.textS}/>
-          </button>
-          <button className="press" onClick={onTodos}
-            style={{position:"relative",width:44,height:44,borderRadius:14,background:T.card2,border:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-            <Ic d={I.list} s={20} c={T.textS}/>
-            {todoCount>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.accent,color:"#fff",borderRadius:999,width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900}}>{todoCount>9?"9+":todoCount}</div>}
-          </button>
-          <button className="press" onClick={onNotifications}
-            style={{position:"relative",width:44,height:44,borderRadius:14,background:T.card2,border:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-            <Ic d={I.bell} s={20} c={T.textS}/>
-            {unreadCount>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.warn,color:"#fff",borderRadius:999,width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900}}>{unreadCount>9?"9+":unreadCount}</div>}
-          </button>
-        </Row>
+        {!vp.isDesktop&&(
+          <Row style={{gap:8}}>
+            <button className="press" onClick={onGlobalSearch} title="بحث"
+              style={{position:"relative",width:44,height:44,borderRadius:14,background:T.card2,border:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+              <Ic d={I.search} s={19} c={T.textS}/>
+            </button>
+            <button className="press" onClick={onTodos}
+              style={{position:"relative",width:44,height:44,borderRadius:14,background:T.card2,border:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+              <Ic d={I.list} s={20} c={T.textS}/>
+              {todoCount>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.accent,color:"#fff",borderRadius:999,width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900}}>{todoCount>9?"9+":todoCount}</div>}
+            </button>
+            <button className="press" onClick={onNotifications}
+              style={{position:"relative",width:44,height:44,borderRadius:14,background:T.card2,border:`1.5px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+              <Ic d={I.bell} s={20} c={T.textS}/>
+              {unreadCount>0&&<div style={{position:"absolute",top:-4,right:-4,background:T.warn,color:"#fff",borderRadius:999,width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900}}>{unreadCount>9?"9+":unreadCount}</div>}
+            </button>
+          </Row>
+        )}
       </Row>
       {projects.length>0&&(
         <div style={{borderRadius:24,padding:20,marginBottom:16,background:over?T.overCard:T.okCard,border:`1.5px solid ${over?T.warn+"44":T.ok+"44"}`}}>
