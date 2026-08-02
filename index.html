@@ -8744,6 +8744,8 @@ function DirectorApp({onLogout,onThemeChange}) {
 
   const vp = useViewport();
   const NAV_ITEMS = [["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["settings","الإعدادات",I.settings]];
+  const currentNavItem = NAV_ITEMS.find(function(x){return x[0]===tab;});
+  const currentNavLabel = currentNavItem ? currentNavItem[1] : "";
 
   return (
     <>
@@ -8762,7 +8764,7 @@ function DirectorApp({onLogout,onThemeChange}) {
                   <LogoMway h={22}/>
                   <div style={{width:1,height:22,background:T.border}}/>
                   <div style={{fontSize:13,color:T.textS,fontFamily:"'DM Mono',monospace",letterSpacing:"0.16em",textTransform:"uppercase"}}>
-                    {NAV_ITEMS.find(x=>x[0]===tab)?.[1]||""}
+                    {currentNavLabel}
                   </div>
                 </div>
                 <button className="press" onClick={()=>setShowGlobalSearch(true)} title="بحث (Cmd+K)"
