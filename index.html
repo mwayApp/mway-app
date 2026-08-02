@@ -1494,86 +1494,140 @@ function QuotationExport({q, contact, banks, subtotal, discountAmt, taxAmt, gran
   var bank = banks[q.bankIdx||0] || null;
   var FC = MWAY_EXPORT[exTheme] || MWAY_EXPORT.dark;
 
-  var rows = q.items.map(function(i,n){
+  // Row for each item — Phase (description) + optional sub-notes as bullets + qty + unit + total
+  var rows = q.items.map(function(i){
     var t = (parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0);
-    return "<tr><td style='padding:10px 12px;border-bottom:1px solid "+FC.border+";color:"+FC.text+";'>"+(i.description||"—")+(i.note?"<div dir='auto' style='font-size:11px;color:"+FC.muted+";margin-top:4px;white-space:pre-wrap;line-height:1.6;'>"+escapeNote(i.note)+"</div>":"")+"</td>"
-      +"<td style='padding:10px 12px;border-bottom:1px solid "+FC.border+";text-align:center;color:"+FC.text+";'>"+(i.qty||1)+"</td>"
-      +"<td style='padding:10px 12px;border-bottom:1px solid "+FC.border+";text-align:right;font-weight:700;color:"+FC.text+";'>"+fmt(parseFloat(i.unitPrice)||0)+"</td>"
-      +"<td style='padding:10px 12px;border-bottom:1px solid "+FC.border+";text-align:right;font-weight:700;color:"+FC.accent+";'>"+fmt(t)+"</td>"
+    var nameCell = "<div style='font-weight:700;color:"+FC.text+";'>"+(i.description||"—")+"</div>";
+    if(i.note) nameCell += "<div dir='auto' style='color:"+FC.muted+";font-size:10.5px;margin-top:4px;white-space:pre-line;line-height:1.55;'>"+escapeNote(i.note)+"</div>";
+    return "<tr><td style='padding:11px 10px;border-bottom:1px solid "+FC.border+";vertical-align:top;font-size:12px;'>"+nameCell+"</td>"
+      +"<td style='padding:11px 10px;border-bottom:1px solid "+FC.border+";text-align:center;color:"+FC.text+";font-family:DM Mono,monospace;font-size:12px;font-weight:600;'>"+(i.qty||1)+"</td>"
+      +"<td style='padding:11px 10px;border-bottom:1px solid "+FC.border+";text-align:right;font-weight:700;color:"+FC.text+";font-family:DM Mono,monospace;font-size:12px;'>"+fmt(parseFloat(i.unitPrice)||0)+"</td>"
+      +"<td style='padding:11px 10px;border-bottom:1px solid "+FC.border+";text-align:right;font-weight:700;color:"+FC.accent+";font-size:12px;'>"+fmt(t)+"</td>"
       +"</tr>";
   }).join("");
 
-  var bankHtml = bank
-    ?"<div style='border-top:1px solid "+FC.border+";padding:18px 22px 20px;'>"
-      +"<div style='font-size:10px;font-weight:500;letter-spacing:0.16em;text-transform:uppercase;color:"+FC.muted+";margin-bottom:10px;font-family:DM Mono,monospace;' dir='ltr'>PAYMENT INFO</div>"
-      +(bank.name?"<div style='font-size:13px;color:"+FC.text+";margin-bottom:3px;'>"+bank.name+"</div>":"")
-      +(bank.holder?"<div style='font-size:13px;color:"+FC.text+";margin-bottom:3px;'>"+bank.holder+"</div>":"")
-      +(bank.account?"<div style='font-size:13px;color:"+FC.text+";margin-bottom:3px;' dir='ltr'>Account: "+bank.account+"</div>":"")
-      +(bank.iban?"<div style='font-size:13px;color:"+FC.text+";margin-bottom:10px;' dir='ltr'>IBAN: "+bank.iban+"</div>":"")
-      +"<div style='font-size:12px;color:"+FC.textS+";margin-top:8px;' dir='ltr'><b>Payment Terms:</b><br/>"
-      +(q.payTerms1||"50")+"% upfront and "+(Math.max(0,100-(parseFloat(q.payTerms1)||50)))+"% "+(q.payTerms2When==="from_first_day"?"starting from the first working day of the project":"after project delivery")+".</div>"
-      +"</div>"
-    :"";
+  // FROM (contact) block
+  var fromLines = "";
+  if(contact.name) fromLines += "<div style='font-size:13px;font-weight:700;color:"+FC.text+";margin-bottom:3px;'>"+contact.name+"</div>";
+  if(contact.location) fromLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;line-height:1.5;'>"+contact.location+"</div>";
+  if(contact.phone) fromLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;font-family:DM Mono,monospace;' dir='ltr'>"+contact.phone+"</div>";
+  if(contact.email) fromLines += "<div style='font-size:11px;color:"+FC.textS+";font-family:DM Mono,monospace;' dir='ltr'>"+contact.email+"</div>";
+  if(!fromLines) fromLines = "<div style='font-size:11px;color:"+FC.muted+";'>—</div>";
 
-  var discountRow = q.discountOn&&discountAmt>0
-    ?"<tr><td colspan='3' style='padding:6px 12px;text-align:right;color:"+FC.textS+";'>Discount</td><td style='padding:6px 12px;text-align:right;color:#B94A3A;font-weight:700;'>-"+fmt(discountAmt)+"</td></tr>"
-    :"";
-  var taxRow = q.taxOn
-    ?"<tr><td colspan='3' style='padding:6px 12px;text-align:right;color:"+FC.textS+";'>Tax (15%)</td><td style='padding:6px 12px;text-align:right;color:"+FC.textS+";'>"+fmt(taxAmt)+"</td></tr>"
-    :"";
-
+  // TO (client) block
   var clientLines = "";
-  if(q.clientName) clientLines += "<div style='font-size:14px;font-weight:700;color:"+FC.text+";margin-bottom:4px;'>"+q.clientName+"</div>";
-  if(q.clientCompany) clientLines += "<div style='font-size:12px;color:"+FC.textS+";margin-bottom:3px;'>"+q.clientCompany+"</div>";
-  if(q.clientLocation) clientLines += "<div style='font-size:12px;color:"+FC.textS+";margin-bottom:3px;'>"+q.clientLocation+"</div>";
-  if(q.clientPhone) clientLines += "<div style='font-size:12px;color:"+FC.textS+";margin-bottom:3px;'>"+q.clientPhone+"</div>";
-  if(q.clientEmail) clientLines += "<div style='font-size:12px;color:"+FC.textS+";margin-bottom:3px;'>"+q.clientEmail+"</div>";
-  if(q.clientCR) clientLines += "<div style='font-size:12px;color:"+FC.textS+";'>CR: "+q.clientCR+"</div>";
-  if(!clientLines) clientLines = "<div style='font-size:13px;color:"+FC.muted+";'>—</div>";
+  if(q.clientName) clientLines += "<div style='font-size:13px;font-weight:700;color:"+FC.text+";margin-bottom:3px;'>"+q.clientName+"</div>";
+  if(q.clientCompany) clientLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;line-height:1.5;'>"+q.clientCompany+"</div>";
+  if(q.clientLocation) clientLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;line-height:1.5;'>"+q.clientLocation+"</div>";
+  if(q.clientPhone) clientLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;font-family:DM Mono,monospace;' dir='ltr'>"+q.clientPhone+"</div>";
+  if(q.clientEmail) clientLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;font-family:DM Mono,monospace;' dir='ltr'>"+q.clientEmail+"</div>";
+  if(q.clientCR) clientLines += "<div style='font-size:11px;color:"+FC.textS+";font-family:DM Mono,monospace;' dir='ltr'>CR: "+q.clientCR+"</div>";
+  if(!clientLines) clientLines = "<div style='font-size:11px;color:"+FC.muted+";'>—</div>";
 
-  var html = "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'/><meta name='viewport' content='width=device-width,initial-scale=1'/><title>Quotation - "+q.title+"</title>"
-    +"<style>@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');"
-    +"*{box-sizing:border-box;margin:0;padding:0;}html{background:"+FC.bg+";}body{font-family:'DM Sans','Tajawal',sans-serif;background:"+FC.bg+";color:"+FC.text+";padding:24px 18px;max-width:760px;margin:0 auto;}@media (min-width:600px){body{padding:40px 32px;}}"
+  // PAYMENT INFO block (top-right column, next to FROM/TO)
+  var paymentLines = "";
+  if(bank){
+    if(bank.name || bank.holder){
+      var payTitle = (bank.name||"") + (bank.name&&bank.holder?" · ":"") + (bank.holder||"");
+      paymentLines += "<div style='font-size:13px;font-weight:700;color:"+FC.text+";margin-bottom:3px;'>"+payTitle+"</div>";
+    }
+    if(bank.account) paymentLines += "<div style='font-size:11px;color:"+FC.textS+";margin-bottom:2px;font-family:DM Mono,monospace;' dir='ltr'>Account: "+bank.account+"</div>";
+    if(bank.iban) paymentLines += "<div style='font-size:11px;color:"+FC.textS+";font-family:DM Mono,monospace;' dir='ltr'>IBAN: "+bank.iban+"</div>";
+  } else {
+    paymentLines = "<div style='font-size:11px;color:"+FC.muted+";'>—</div>";
+  }
+
+  // Optional totals rows
+  var discountRow = q.discountOn&&discountAmt>0
+    ? "<div style='display:flex;justify-content:space-between;font-size:12px;color:"+FC.textS+";padding:4px 0;font-family:DM Mono,monospace;'><span>Discount</span><span style='color:#B94A3A;'>-"+fmt(discountAmt)+"</span></div>"
+    : "";
+  var taxRow = q.taxOn
+    ? "<div style='display:flex;justify-content:space-between;font-size:12px;color:"+FC.textS+";padding:4px 0;font-family:DM Mono,monospace;'><span>Tax (15%)</span><span>"+fmt(taxAmt)+"</span></div>"
+    : "";
+
+  // Payment Terms (preserves the app's original wording)
+  var payTermsText = (q.payTerms1||"50")+"% upfront and "+(Math.max(0,100-(parseFloat(q.payTerms1)||50)))+"% "+(q.payTerms2When==="from_first_day"?"starting from the first working day of the project":"after project delivery")+".";
+
+  // Notes block (only if provided)
+  var notesBlock = (q.notes&&q.notes.trim())
+    ? "<div style='padding:8px 4px 0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;'>"
+      +"<div style='font-size:9px;color:"+FC.muted+";font-weight:500;letter-spacing:0.18em;text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:8px;'><span dir='ltr'>Notes</span> &middot; ملاحظات</div>"
+      +"<div dir='auto' style='font-size:11px;color:"+FC.textS+";line-height:1.7;white-space:pre-wrap;overflow:hidden;flex:1;'>"+escapeNote(q.notes)+"</div>"
+      +"</div>"
+    : "<div style='flex:1;'></div>";
+
+  var html = "<!DOCTYPE html><html lang='en' dir='ltr'><head><meta charset='UTF-8'/><meta name='viewport' content='width=device-width,initial-scale=1'/><title>Quotation - "+q.title+"</title>"
+    +"<style>"
+    +"@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700;900&family=DM+Mono:wght@400;500&display=swap');"
+    +"@page{size:A4 portrait;margin:0;}"
+    +"*{box-sizing:border-box;margin:0;padding:0;}"
+    +"html,body{background:#2A2A2A;}"
+    +"body{font-family:'DM Sans','Tajawal',sans-serif;padding:20px 0;display:flex;justify-content:center;}"
+    +".sheet{width:210mm;height:297mm;background:"+FC.bg+";color:"+FC.text+";padding:15mm 15mm 12mm;box-shadow:0 6px 30px rgba(0,0,0,0.4);display:flex;flex-direction:column;gap:10px;overflow:hidden;}"
+    +"[dir=\"rtl\"]{text-align:right;}"
     +"[dir=\"ltr\"]{unicode-bidi:isolate;}"
-    +"table{width:100%;border-collapse:collapse;}th{background:"+FC.card2+";padding:10px 12px;font-weight:500;color:"+FC.muted+";border-bottom:2px solid "+FC.border+";text-align:right;font-family:DM Mono,monospace;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;}"
-    +".card{background:"+FC.card+";border:1.5px solid "+FC.border+";border-radius:16px;overflow:hidden;margin-bottom:20px;}"
+    +"table{width:100%;border-collapse:collapse;}"
+    +"@media print{html,body{background:"+FC.bg+";}body{padding:0;display:block;}.sheet{box-shadow:none;page-break-after:avoid;}}"
     +"</style></head><body>"
-    +"<div style='background:"+FC.headerBg+";color:"+FC.headerText+";border-radius:20px;padding:28px 32px;margin-bottom:32px;'>"
-    +"<div style='margin-bottom:16px;'>"+logoSvgHtml(FC.headerText,32)+"</div>"
-    +"<div style='font-size:10px;letter-spacing:0.18em;text-transform:uppercase;opacity:.8;margin-bottom:8px;font-family:DM Mono,monospace;'><span dir='ltr'>Majd Alqurashi</span> · مجد القرشي</div>"
-    +"<h1 style='font-size:24px;font-weight:900;letter-spacing:1px;margin-bottom:4px;' dir='ltr'>ART SERVICES QUOTATION</h1>"
-    +"<div style='font-size:13px;opacity:.9;' dir='ltr'>"+q.issueDate+"</div>"
+
+    // ── Sheet start ──
+    +"<div class='sheet'>"
+
+    // ── HEADER: logo + big QUOTATION title + subtitle ──
+    +"<div style='text-align:center;padding:4px 0 14px;border-bottom:1px solid "+FC.border+";flex-shrink:0;'>"
+    +"<div style='margin-bottom:10px;'>"+logoSvgHtml(FC.text,30)+"</div>"
+    +"<div style='font-family:DM Sans,sans-serif;font-size:38px;font-weight:900;letter-spacing:0.45em;color:"+FC.text+";padding-right:0.45em;margin-bottom:5px;' dir='ltr'>QUOTATION</div>"
+    +"<div style='font-size:11px;color:"+FC.muted+";font-family:DM Mono,monospace;letter-spacing:0.24em;text-transform:uppercase;' dir='ltr'>Art Services · مجد القرشي · "+q.issueDate+"</div>"
     +"</div>"
-    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;'>"
-    +"<div style='background:"+FC.card+";border:1.5px solid "+FC.border+";border-radius:14px;padding:18px 20px;'>"
-    +"<div style='font-size:10px;font-weight:500;letter-spacing:0.16em;text-transform:uppercase;color:"+FC.muted+";margin-bottom:10px;font-family:DM Mono,monospace;' dir='ltr'>FROM</div>"
-    +(contact.name?"<div style='font-size:14px;font-weight:700;color:"+FC.text+";margin-bottom:4px;'>"+contact.name+"</div>":"")
-    +(contact.location?"<div style='font-size:12px;color:"+FC.textS+";margin-bottom:3px;'>"+contact.location+"</div>":"")
-    +(contact.phone?"<div style='font-size:12px;color:"+FC.textS+";margin-bottom:3px;'>"+contact.phone+"</div>":"")
-    +(contact.email?"<div style='font-size:12px;color:"+FC.textS+";'>"+contact.email+"</div>":"")
+
+    // ── INFO ROW: FROM · TO · PAYMENT INFO (3 columns) ──
+    +"<div style='display:grid;grid-template-columns:1fr 1fr 1.1fr;gap:12px;flex-shrink:0;'>"
+    +"<div style='padding:0 4px;'>"
+    +"<div style='font-size:9px;color:"+FC.muted+";font-weight:500;letter-spacing:0.18em;text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:8px;' dir='ltr'>From</div>"
+    +fromLines
     +"</div>"
-    +"<div style='background:"+FC.card+";border:1.5px solid "+FC.border+";border-radius:14px;padding:18px 20px;'>"
-    +"<div style='font-size:10px;font-weight:500;letter-spacing:0.16em;text-transform:uppercase;color:"+FC.muted+";margin-bottom:10px;font-family:DM Mono,monospace;' dir='ltr'>TO</div>"
+    +"<div style='padding:0 4px;border-right:1px solid "+FC.border+";padding-right:12px;'>"
+    +"<div style='font-size:9px;color:"+FC.muted+";font-weight:500;letter-spacing:0.18em;text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:8px;' dir='ltr'>To</div>"
     +clientLines
-    +"</div></div>"
-    +"<div class='card'>"
-    +"<div style='padding:14px 16px;border-bottom:1px solid "+FC.border+";font-size:10px;font-weight:500;letter-spacing:0.16em;text-transform:uppercase;color:"+FC.muted+";font-family:DM Mono,monospace;' dir='ltr'>ITEMIZED QUOTATION DETAILS</div>"
-    +"<table dir='ltr'><thead><tr><th style='text-align:left;'>Item Description</th><th style='text-align:center;'>Quantity</th><th style='text-align:right;'>Unit Price</th><th style='text-align:right;'>Total Price</th></tr></thead>"
-    +"<tbody>"+rows+"</tbody>"
-    +"<tfoot style='background:"+FC.card2+";'>"
-    +"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:"+FC.textS+";border-top:1px solid "+FC.border+";'>Subtotal</td><td style='padding:8px 12px;text-align:right;font-weight:700;color:"+FC.text+";border-top:1px solid "+FC.border+";'>"+fmt(subtotal)+"</td></tr>"
-    +discountRow+taxRow
-    +"<tr style='background:"+FC.accent+"15;'><td colspan='3' style='padding:12px;text-align:right;font-size:15px;font-weight:700;color:"+FC.text+";border-top:2px solid "+FC.border+";'>Total Amount</td>"
-    +"<td style='padding:12px;text-align:right;font-size:18px;font-weight:900;color:"+FC.accent+";border-top:2px solid "+FC.border+";'>"+fmt(grandTotal)+"</td></tr>"
-    +"</tfoot></table>"
-    +bankHtml
     +"</div>"
-    +(q.notes&&q.notes.trim()
-      ?"<div style='background:"+FC.card+";border:1.5px solid "+FC.border+";border-radius:14px;padding:18px 22px;margin-top:20px;'>"
-        +"<div style='font-size:10px;color:"+FC.muted+";font-weight:500;letter-spacing:0.16em;text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:10px;'><span dir='ltr'>NOTES</span> &middot; ملاحظات</div>"
-        +"<div dir='auto' style='font-size:13px;color:"+FC.text+";line-height:1.7;white-space:pre-wrap;'>"+escapeNote(q.notes)+"</div>"
-        +"</div>"
-      :"")
+    +"<div style='padding:0 4px;border-right:1px solid "+FC.border+";padding-right:12px;'>"
+    +"<div style='font-size:9px;color:"+FC.muted+";font-weight:500;letter-spacing:0.18em;text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:8px;' dir='ltr'>Payment Info</div>"
+    +paymentLines
+    +"</div>"
+    +"</div>"
+
+    // ── ITEMS TABLE ──
+    +"<div style='border-top:1.5px solid "+FC.border+";border-bottom:1.5px solid "+FC.border+";margin-top:2px;flex-shrink:0;'>"
+    +"<table dir='ltr'>"
+    +"<thead><tr>"
+    +"<th style='padding:10px 10px;font-weight:500;color:"+FC.muted+";font-family:DM Mono,monospace;font-size:10px;letter-spacing:0.16em;text-transform:uppercase;border-bottom:1px solid "+FC.border+";text-align:left;width:60%;'>Item</th>"
+    +"<th style='padding:10px 10px;font-weight:500;color:"+FC.muted+";font-family:DM Mono,monospace;font-size:10px;letter-spacing:0.16em;text-transform:uppercase;border-bottom:1px solid "+FC.border+";text-align:center;width:10%;'>Qty</th>"
+    +"<th style='padding:10px 10px;font-weight:500;color:"+FC.muted+";font-family:DM Mono,monospace;font-size:10px;letter-spacing:0.16em;text-transform:uppercase;border-bottom:1px solid "+FC.border+";text-align:right;width:14%;'>Unit</th>"
+    +"<th style='padding:10px 10px;font-weight:500;color:"+FC.muted+";font-family:DM Mono,monospace;font-size:10px;letter-spacing:0.16em;text-transform:uppercase;border-bottom:1px solid "+FC.border+";text-align:right;width:16%;'>Total</th>"
+    +"</tr></thead>"
+    +"<tbody>"+rows+"</tbody>"
+    +"</table>"
+    +"</div>"
+
+    // ── TOTALS (right-aligned) ──
+    +"<div style='display:flex;justify-content:flex-end;padding:8px 4px 4px;flex-shrink:0;'>"
+    +"<div style='min-width:260px;'>"
+    +"<div style='display:flex;justify-content:space-between;font-size:12px;color:"+FC.textS+";padding:4px 0;font-family:DM Mono,monospace;'><span>Subtotal</span><span>"+fmt(subtotal)+"</span></div>"
+    +discountRow+taxRow
+    +"<div style='display:flex;justify-content:space-between;font-size:16px;font-weight:900;color:"+FC.text+";font-family:DM Sans,sans-serif;letter-spacing:0.02em;border-top:1.5px solid "+FC.border+";margin-top:4px;padding-top:8px;'><span>Total</span><span style='color:"+FC.accent+";'>"+fmt(grandTotal)+"</span></div>"
+    +"</div>"
+    +"</div>"
+
+    // ── NOTES (flexes to fill remaining space) ──
+    +notesBlock
+
+    // ── PAYMENT TERMS (at bottom, below notes) ──
+    +"<div style='background:"+FC.card+";border-radius:10px;padding:12px 16px;flex-shrink:0;margin-top:4px;'>"
+    +"<div style='font-size:9px;color:"+FC.muted+";font-weight:500;letter-spacing:0.18em;text-transform:uppercase;font-family:DM Mono,monospace;margin-bottom:5px;' dir='ltr'>Payment Terms</div>"
+    +"<div style='font-size:12px;color:"+FC.text+";line-height:1.6;' dir='ltr'>"+payTermsText+"</div>"
+    +"</div>"
+
+    +"</div>" // /sheet
     +"</body></html>";
 
   var a = document.createElement("a");
