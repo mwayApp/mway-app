@@ -3360,7 +3360,7 @@ function DirectorProjectPage({project,onUpdate,onDelete,onBack,showToast,todos=[
 
         {/* GUESTS / INVITATIONS TAB */}
         {subTab==="guests"&&project.hostingEnabled&&(
-          <InvitationsTab project={project} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} showToast={showToast} autoAdvance={autoAdvance}/>
+          <InvitationsTab project={project} onUpdate={onUpdate} audience={audience} setAudience={setAudience} invitations={invitations} setInvitations={setInvitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} customInterests={customInterests} customCities={customCities} showToast={showToast} autoAdvance={autoAdvance}/>
         )}
 
         {/* SEARCH TAB */}
@@ -7359,7 +7359,7 @@ function AudienceImportModal({existing,onClose,onImport}){
 /* ══════════════════════════════════════
    INVITATIONS — TAB + PICKER MODAL
 ══════════════════════════════════════ */
-function InvitationsTab({project,audience,setAudience,invitations,setInvitations,surveyQuestions,setSurveyQuestions,surveyResponses,setSurveyResponses,customInterests,customCities,showToast,autoAdvance=()=>{}}){
+function InvitationsTab({project,onUpdate=()=>{},audience,setAudience,invitations,setInvitations,surveyQuestions,setSurveyQuestions,surveyResponses,setSurveyResponses,customInterests,customCities,showToast,autoAdvance=()=>{}}){
   const T=useT();
   const [pickerOpen,setPickerOpen]=useState(false);
   const [searchText,setSearchText]=useState("");
@@ -7470,7 +7470,7 @@ function InvitationsTab({project,audience,setAudience,invitations,setInvitations
       </Row>
 
       {guestsSubTab==="survey"?(
-        <SurveyEditor project={project} audience={audience} invitations={invitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} showToast={showToast}/>
+        <SurveyEditor project={project} onUpdate={onUpdate} audience={audience} invitations={invitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} showToast={showToast}/>
       ):<>
 
       <Row style={{justifyContent:"space-between",marginBottom:12,gap:8,alignItems:"center"}}>
@@ -7672,6 +7672,61 @@ function AudiencePickerModal({audience,excludeIds,customInterests,customCities,o
 /* ══════════════════════════════════════
    SURVEY EDITOR (director side, inside project)
 ══════════════════════════════════════ */
+/* ═══ Survey customization: defaults, presets, helpers ═══ */
+var DEFAULT_SURVEY_CUSTOMIZATION={
+  bg_color:"",           // "" → use theme card
+  accent_color:"",       // "" → use theme accent
+  hero_image_url:"",
+  welcome_message:"",
+  thank_you_title:"شكراً لك!",
+  thank_you_message:"وصلتنا إجاباتك.\nرأيك يساعدنا نصنع تجارب أفضل.",
+  submit_button_text:"إرسال الرد",
+  rating_icon:"star",           // star | heart | thumb | number | circle | emoji
+  rating_emoji:"🔥",
+  yes_no_style:"default",       // default | check_x | heart | custom
+  yes_emoji:"👍",
+  no_emoji:"👎",
+  show_progress:false,
+};
+var SURVEY_BG_PRESETS=[
+  {id:"",label:"افتراضي (المظهر)",v:""},
+  {id:"cream",label:"🥧 كريمي",v:"#faf3e7"},
+  {id:"mint",label:"🌿 نعناعي",v:"#e8f5ec"},
+  {id:"lavender",label:"💜 لافندر",v:"#efe8f7"},
+  {id:"peach",label:"🍑 خوخي",v:"#fbe9e0"},
+  {id:"sky",label:"☁️ سماوي",v:"#e4f0f9"},
+  {id:"black",label:"⚫ داكن",v:"#121212"},
+];
+var SURVEY_ACCENT_PRESETS=[
+  {id:"",label:"افتراضي",v:""},
+  {id:"pink",v:"#f59fc4"},
+  {id:"gold",v:"#d4af7a"},
+  {id:"forest",v:"#4a7c59"},
+  {id:"ocean",v:"#3d6b8f"},
+  {id:"sunset",v:"#e07856"},
+  {id:"lilac",v:"#8b6f9c"},
+  {id:"charcoal",v:"#333333"},
+];
+var RATING_ICON_STYLES=[
+  {id:"star",label:"⭐ نجوم",filled:"★",empty:"☆",activeColor:"#f5c518"},
+  {id:"heart",label:"❤️ قلوب",filled:"❤",empty:"♡",activeColor:"#e05d5d"},
+  {id:"thumb",label:"👍 إبهام",filled:"👍",empty:"👍",activeColor:"",opacity:true},
+  {id:"number",label:"1-5 أرقام",filled:"num",empty:"num",activeColor:""},
+  {id:"circle",label:"● دوائر",filled:"●",empty:"○",activeColor:""},
+  {id:"emoji",label:"إيموجي مخصص",filled:"emoji",empty:"emoji",activeColor:"",opacity:true},
+];
+var YES_NO_STYLES=[
+  {id:"default",label:"👍👎 افتراضي",yes:"👍 نعم",no:"👎 لا"},
+  {id:"check_x",label:"✅❌",yes:"✅ نعم",no:"❌ لا"},
+  {id:"heart",label:"❤️💔",yes:"❤️ نعم",no:"💔 لا"},
+  {id:"custom",label:"إيموجي مخصص",yes:"",no:""},
+];
+function mergeSurveyCust(c){
+  var out={}; for(var k in DEFAULT_SURVEY_CUSTOMIZATION){ out[k]=DEFAULT_SURVEY_CUSTOMIZATION[k]; }
+  if(c&&typeof c==="object"){ for(var k2 in c){ if(c[k2]!==undefined&&c[k2]!==null) out[k2]=c[k2]; } }
+  return out;
+}
+
 var SURVEY_TEMPLATES={
   cafe:{name:"☕ فعالية قهوة",qs:[
     {q_type:"rating",question:"كيف تقيّم القهوة؟",required:true},
@@ -7700,7 +7755,7 @@ var Q_TYPE_META={
   text:{icon:"✍️",label:"نص حر"},
 };
 
-function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQuestions,surveyResponses,setSurveyResponses,showToast}){
+function SurveyEditor({project,onUpdate=()=>{},audience,invitations,surveyQuestions,setSurveyQuestions,surveyResponses,setSurveyResponses,showToast}){
   const T=useT();
   const [editingQ,setEditingQ]=useState(null);
   const [viewingResp,setViewingResp]=useState(null);
@@ -7711,6 +7766,16 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
   const [copied,setCopied]=useState(false);
   const [showTemplate,setShowTemplate]=useState(false);
   const [showExportChoice,setShowExportChoice]=useState(false);
+  const [showCustomize,setShowCustomize]=useState(false);
+  const [showSaveTpl,setShowSaveTpl]=useState(false);
+  const cust=mergeSurveyCust(project.surveyCustomization);
+  const saveCust=async(newC)=>{
+    try{
+      await sb.patch("projects",project.id,{survey_customization:newC});
+      onUpdate({...project,surveyCustomization:newC});
+      showToast&&showToast("تم حفظ التخصيص ✓");
+    }catch(e){ alert("فشل الحفظ: "+(e.message||e)); }
+  };
 
   const projectQs=surveyQuestions.filter(q=>q.project_id===project.id).sort((a,b)=>(a.order_num||0)-(b.order_num||0));
   const projectResps=surveyResponses.filter(r=>r.project_id===project.id);
@@ -7793,7 +7858,12 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
   };
 
   const applyTemplate=async(tplId)=>{
-    const tpl=SURVEY_TEMPLATES[tplId];
+    // Look up in built-in first, then in custom templates
+    var tpl=SURVEY_TEMPLATES[tplId];
+    if(!tpl){
+      var customs=loadCustomTemplates();
+      tpl=customs.find(function(t){ return t.id===tplId; });
+    }
     if(!tpl) return;
     if(projectQs.length&&!confirm("سيتم إضافة أسئلة القالب فوق الأسئلة الحالية. متابعة؟")) return;
     try{
@@ -7812,6 +7882,13 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
         created.push(row);
       }
       setSurveyQuestions(prev=>[...prev,...created]);
+      // Also apply customization if template carries one
+      if(tpl.customization){
+        try{
+          await sb.patch("projects",project.id,{survey_customization:tpl.customization});
+          onUpdate({...project,surveyCustomization:tpl.customization});
+        }catch(e){}
+      }
       setShowTemplate(false);
       showToast&&showToast("تم تطبيق القالب ✓");
     }catch(e){ alert("فشل: "+(e.message||e)); }
@@ -7868,7 +7945,10 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
       <div style={{background:T.accent+"15",border:`1.5px solid ${T.accent}55`,borderRadius:16,padding:"14px 16px",marginBottom:14}}>
         <div style={{fontSize:11,color:T.muted,fontWeight:600,marginBottom:6}}>🔗 رابط الاستبيان</div>
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:9,padding:"9px 12px",fontFamily:"'DM Mono',monospace",fontSize:11,color:T.text,marginBottom:8,wordBreak:"break-all",direction:"ltr",textAlign:"left"}}>{surveyUrl}</div>
-        <Btn full sm onClick={copyLink}>{copied?"✓ تم النسخ":"📋 نسخ الرابط"}</Btn>
+        <Row style={{gap:6}}>
+          <Btn full sm onClick={copyLink}>{copied?"✓ تم النسخ":"📋 نسخ الرابط"}</Btn>
+          <Btn variant="ghost" sm onClick={()=>setShowCustomize(true)}>🎨 تخصيص</Btn>
+        </Row>
       </div>
 
       {/* Response stats */}
@@ -7894,6 +7974,7 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
         <div style={{fontSize:14,fontWeight:800,color:T.text}}>📝 الأسئلة ({projectQs.length})</div>
         <Row style={{gap:6}}>
           {projectQs.length===0&&<Btn variant="ghost" sm onClick={()=>setShowTemplate(true)}>📋 قوالب</Btn>}
+          {projectQs.length>0&&<Btn variant="ghost" sm onClick={()=>setShowSaveTpl(true)}>💾 حفظ كقالب</Btn>}
           <Btn sm onClick={()=>setEditingQ("new")}><Ic d={I.plus} s={14}/> سؤال</Btn>
         </Row>
       </Row>
@@ -8060,6 +8141,18 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
               <div style={{fontSize:11,color:T.muted}}>{tpl.qs.length} أسئلة · {tpl.qs.map(q=>Q_TYPE_META[q.q_type]?.icon).join(" ")}</div>
             </div>
           ))}
+          {loadCustomTemplates().length>0&&(
+            <>
+              <div style={{fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",textTransform:"uppercase",margin:"14px 0 8px"}}>قوالبك المخصصة</div>
+              {loadCustomTemplates().map(function(tpl){
+                return <div key={tpl.id} className="press card-hover" onClick={function(){applyTemplate(tpl.id);}}
+                  style={{background:T.accent+"10",border:`1.5px solid ${T.accent}44`,borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:6}}>💾 {tpl.name}</div>
+                  <div style={{fontSize:11,color:T.muted}}>{tpl.qs.length} أسئلة{tpl.customization?" · 🎨 مع تخصيصات":""}</div>
+                </div>;
+              })}
+            </>
+          )}
         </Modal>
       )}
 
@@ -8070,7 +8163,202 @@ function SurveyEditor({project,audience,invitations,surveyQuestions,setSurveyQue
         invitations={invitations.filter(i=>i.project_id===project.id)}
         onClose={()=>setViewingResp(null)}
       />}
+
+      {showCustomize&&<SurveyCustomizationModal
+        initial={cust}
+        onClose={()=>setShowCustomize(false)}
+        onSave={(c)=>{ saveCust(c); setShowCustomize(false); }}
+      />}
+
+      {showSaveTpl&&<SaveTemplateModal
+        onClose={()=>setShowSaveTpl(false)}
+        onSave={(name)=>{
+          var list=loadCustomTemplates();
+          var newTpl={
+            id:"cust_"+Date.now(),
+            name:name,
+            qs:projectQs.map(function(q){ return {q_type:q.q_type,question:q.question,options:q.options||[],required:!!q.required}; }),
+            customization:cust,
+          };
+          saveCustomTemplates(list.concat([newTpl]));
+          setShowSaveTpl(false);
+          showToast&&showToast("تم حفظ القالب ✓");
+        }}
+      />}
     </div>
+  );
+}
+
+/* ═══ Survey customization modal ═══ */
+function SurveyCustomizationModal({initial,onClose,onSave}){
+  const T=useT();
+  const [c,setC]=useState(mergeSurveyCust(initial));
+  const [sec,setSec]=useState("colors"); // colors | icons | messages | layout
+  const set=(k,v)=>setC(function(prev){ var n=Object.assign({},prev); n[k]=v; return n; });
+  const uploadHero=async(e)=>{
+    var f=e.target.files&&e.target.files[0]; if(!f) return;
+    if(f.size>3*1024*1024){ alert("الصورة أكبر من 3MB"); return; }
+    try{
+      var ext=(f.name.split(".").pop()||"jpg").toLowerCase();
+      var path="hero_"+Date.now()+"."+ext;
+      var url=await sb.uploadFile("moodboards",path,f);
+      set("hero_image_url",url);
+    }catch(err){ alert("فشل الرفع: "+(err.message||err)); }
+  };
+  var lbl={fontSize:11,color:T.muted,fontWeight:700,marginBottom:6,display:"block"};
+  var inp={width:"100%",background:T.card,border:"1px solid "+T.border,borderRadius:9,padding:"9px 12px",color:T.text,fontSize:13,outline:"none",fontFamily:"Tajawal,sans-serif",boxSizing:"border-box"};
+  return (
+    <Modal title="🎨 تخصيص شكل الاستبيان" onClose={onClose}>
+      {/* section tabs */}
+      <Row style={{gap:0,marginBottom:14,background:T.card2,borderRadius:10,padding:3}}>
+        {[["colors","🎨 ألوان"],["icons","⭐ أيقونات"],["messages","💬 رسائل"],["layout","📐 شكل"]].map(function(pair){
+          var id=pair[0], l=pair[1], on=sec===id;
+          return <button key={id} className="press" onClick={function(){setSec(id);}}
+            style={{flex:1,padding:"7px 0",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"Tajawal,sans-serif",fontSize:11,fontWeight:700,background:on?T.card:"transparent",color:on?T.accent:T.muted}}>{l}</button>;
+        })}
+      </Row>
+
+      {sec==="colors"&&(
+        <div>
+          <label style={lbl}>لون الخلفية</label>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:8}}>
+            {SURVEY_BG_PRESETS.map(function(p){
+              var on=c.bg_color===p.v;
+              return <button key={p.id||"def"} className="press" onClick={function(){set("bg_color",p.v);}}
+                style={{background:p.v||T.card2,border:"1.5px solid "+(on?T.accent:T.border),borderRadius:9,padding:"10px 4px",cursor:"pointer",color:p.v==="#121212"?"#fff":T.text,fontSize:10,fontWeight:700}}>{p.label}</button>;
+            })}
+          </div>
+          <input type="color" value={c.bg_color||"#ffffff"} onChange={function(e){set("bg_color",e.target.value);}}
+            style={{width:"100%",height:36,border:"1px solid "+T.border,borderRadius:8,marginBottom:16,cursor:"pointer"}}/>
+
+          <label style={lbl}>لون الـ Accent (الأزرار والاختيارات)</label>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:8}}>
+            {SURVEY_ACCENT_PRESETS.map(function(p){
+              var on=c.accent_color===p.v;
+              return <button key={p.id||"def"} className="press" onClick={function(){set("accent_color",p.v);}}
+                style={{background:p.v||T.card2,border:"1.5px solid "+(on?"#fff":T.border),borderRadius:9,padding:"14px 4px",cursor:"pointer",color:p.v?"#fff":T.text,fontSize:10,fontWeight:700}}>{p.label||"—"}</button>;
+            })}
+          </div>
+          <input type="color" value={c.accent_color||"#f59fc4"} onChange={function(e){set("accent_color",e.target.value);}}
+            style={{width:"100%",height:36,border:"1px solid "+T.border,borderRadius:8,cursor:"pointer"}}/>
+        </div>
+      )}
+
+      {sec==="icons"&&(
+        <div>
+          <label style={lbl}>أيقونة التقييم (Rating)</label>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
+            {RATING_ICON_STYLES.map(function(s){
+              var on=c.rating_icon===s.id;
+              return <button key={s.id} className="press" onClick={function(){set("rating_icon",s.id);}}
+                style={{background:on?T.accent+"18":T.card2,border:"1.5px solid "+(on?T.accent:T.border),borderRadius:10,padding:"10px 4px",cursor:"pointer",color:on?T.accent:T.text,fontSize:11,fontWeight:700}}>{s.label}</button>;
+            })}
+          </div>
+          {c.rating_icon==="emoji"&&(
+            <div style={{marginBottom:14}}>
+              <label style={lbl}>الإيموجي المخصص</label>
+              <input value={c.rating_emoji||""} onChange={function(e){set("rating_emoji",e.target.value);}}
+                placeholder="🔥" maxLength={4} style={Object.assign({},inp,{fontSize:22,textAlign:"center"})}/>
+            </div>
+          )}
+
+          <label style={lbl}>أيقونات نعم / لا</label>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6,marginBottom:10}}>
+            {YES_NO_STYLES.map(function(s){
+              var on=c.yes_no_style===s.id;
+              return <button key={s.id} className="press" onClick={function(){set("yes_no_style",s.id);}}
+                style={{background:on?T.accent+"18":T.card2,border:"1.5px solid "+(on?T.accent:T.border),borderRadius:10,padding:"10px 4px",cursor:"pointer",color:on?T.accent:T.text,fontSize:11,fontWeight:700}}>{s.label}</button>;
+            })}
+          </div>
+          {c.yes_no_style==="custom"&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <label style={lbl}>نعم</label>
+                <input value={c.yes_emoji||""} onChange={function(e){set("yes_emoji",e.target.value);}} placeholder="👍" maxLength={4} style={Object.assign({},inp,{textAlign:"center",fontSize:22})}/>
+              </div>
+              <div>
+                <label style={lbl}>لا</label>
+                <input value={c.no_emoji||""} onChange={function(e){set("no_emoji",e.target.value);}} placeholder="👎" maxLength={4} style={Object.assign({},inp,{textAlign:"center",fontSize:22})}/>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {sec==="messages"&&(
+        <div>
+          <label style={lbl}>صورة الرأس (Hero) — اختياري</label>
+          {c.hero_image_url?(
+            <div style={{marginBottom:12}}>
+              <img src={c.hero_image_url} alt="hero" style={{width:"100%",maxHeight:120,objectFit:"cover",borderRadius:10,border:"1px solid "+T.border}}/>
+              <button onClick={function(){set("hero_image_url","");}} className="press"
+                style={{marginTop:6,background:"transparent",border:"none",color:T.muted,fontSize:11,cursor:"pointer"}}>× حذف الصورة</button>
+            </div>
+          ):(
+            <label style={{display:"block",background:T.card2,border:"1.5px dashed "+T.border,borderRadius:10,padding:"14px",textAlign:"center",cursor:"pointer",marginBottom:14,fontSize:12,color:T.muted}}>
+              📷 اختاري صورة
+              <input type="file" accept="image/*" onChange={uploadHero} style={{display:"none"}}/>
+            </label>
+          )}
+
+          <label style={lbl}>رسالة الترحيب (فوق الاستبيان)</label>
+          <textarea value={c.welcome_message||""} onChange={function(e){set("welcome_message",e.target.value);}}
+            rows={2} placeholder="مثال: شكراً على حضورك الفعالية…"
+            style={Object.assign({},inp,{fontFamily:"Tajawal,sans-serif",direction:"rtl",resize:"vertical",marginBottom:14})}/>
+
+          <label style={lbl}>عنوان الشكر (بعد الإرسال)</label>
+          <input value={c.thank_you_title||""} onChange={function(e){set("thank_you_title",e.target.value);}}
+            placeholder="شكراً لك!" style={Object.assign({},inp,{direction:"rtl",marginBottom:10})}/>
+
+          <label style={lbl}>رسالة الشكر</label>
+          <textarea value={c.thank_you_message||""} onChange={function(e){set("thank_you_message",e.target.value);}}
+            rows={2} placeholder="وصلتنا إجاباتك…"
+            style={Object.assign({},inp,{fontFamily:"Tajawal,sans-serif",direction:"rtl",resize:"vertical",marginBottom:14})}/>
+
+          <label style={lbl}>نص زر الإرسال</label>
+          <input value={c.submit_button_text||""} onChange={function(e){set("submit_button_text",e.target.value);}}
+            placeholder="إرسال الرد" style={Object.assign({},inp,{direction:"rtl"})}/>
+        </div>
+      )}
+
+      {sec==="layout"&&(
+        <div>
+          <div style={{background:T.card2,border:"1px solid "+T.border,borderRadius:12,padding:"14px 16px",marginBottom:10}}>
+            <Row style={{justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:4}}>📊 شريط التقدم</div>
+                <div style={{fontSize:11,color:T.muted}}>يظهر للمستفتي: السؤال X من Y</div>
+              </div>
+              <button className="press" onClick={function(){set("show_progress",!c.show_progress);}}
+                style={{background:c.show_progress?T.accent:T.border,border:"none",borderRadius:999,width:44,height:24,cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+                <div style={{position:"absolute",top:2,right:c.show_progress?2:22,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"right 0.2s"}}/>
+              </button>
+            </Row>
+          </div>
+        </div>
+      )}
+
+      <Row style={{gap:8,marginTop:18}}>
+        <Btn variant="ghost" sm style={{flex:1}} onClick={function(){setC(mergeSurveyCust(null));}}>↺ إعادة تعيين</Btn>
+        <Btn full onClick={function(){onSave(c);}}>حفظ التخصيص</Btn>
+      </Row>
+    </Modal>
+  );
+}
+
+function SaveTemplateModal({onClose,onSave}){
+  const T=useT();
+  const [name,setName]=useState("");
+  return (
+    <Modal title="💾 حفظ كقالب" onClose={onClose}>
+      <div style={{fontSize:12,color:T.muted,marginBottom:12,lineHeight:1.65}}>
+        سيتم حفظ جميع الأسئلة الحالية + التخصيصات كقالب قابل لإعادة الاستخدام (محلياً على جهازك).
+      </div>
+      <label style={{fontSize:11,color:T.muted,fontWeight:700,display:"block",marginBottom:6}}>اسم القالب</label>
+      <input value={name} onChange={function(e){setName(e.target.value);}} placeholder="مثال: فعالية عشاء رومنسي"
+        style={{width:"100%",background:T.card,border:"1px solid "+T.border,borderRadius:9,padding:"10px 12px",color:T.text,fontSize:13,outline:"none",fontFamily:"Tajawal,sans-serif",direction:"rtl",boxSizing:"border-box",marginBottom:14}}/>
+      <Btn full disabled={!name.trim()} onClick={function(){onSave(name.trim());}}>حفظ القالب</Btn>
+    </Modal>
   );
 }
 
@@ -8730,8 +9018,10 @@ function SurveysTab({projects, surveyQuestions, setSurveyQuestions, surveyRespon
       {/* ═════ TEMPLATES VIEW ═════ */}
       {subTab==="templates" && (
         <div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:12,padding:"10px 14px",background:T.accent+"11",border:`1px solid ${T.accent}33`,borderRadius:11}}>
-            💡 القوالب تجمع أسئلة جاهزة يمكن تطبيقها على أي مشروع استضافة بضغطة واحدة. القوالب المبنية داخل التطبيق ثابتة، والقوالب المخصصة تحفظ محلياً على جهازك.
+          <div style={{fontSize:11,color:T.muted,marginBottom:12,padding:"10px 14px",background:T.accent+"11",border:`1px solid ${T.accent}33`,borderRadius:11,lineHeight:1.65}}>
+            💡 القوالب تجمع أسئلة + تخصيصات (ألوان/أيقونات/رسائل) قابلة للتطبيق على أي مشروع بضغطة.
+            <br/>
+            <b>لإنشاء قالب مخصص:</b> افتحي أي استبيان → أضيفي الأسئلة والتخصيصات → اضغطي <b>💾 حفظ كقالب</b>.
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
             {allTpls.map(function(tpl){
@@ -8884,6 +9174,7 @@ function DirectorApp({onLogout,onThemeChange}) {
           stageHistory:Array.isArray(p.stage_history)?p.stage_history:(p.stage_history?JSON.parse(p.stage_history):[]),
           moodboardName:p.moodboard_name||null, moodboardFile:p.moodboard_file||null, moodboardDesc:p.moodboard_desc||"",
           hostingEnabled:!!p.hosting_enabled, eventCategory:p.event_category||null,
+          surveyCustomization:p.survey_customization||null,
           expenses:expRows.filter(e=>e.project_id===p.id).map(e=>({...e,amount:Number(e.amount||0),member_id:e.member_id||null})),
           teamMembers:memberRows.filter(m=>m.project_id===p.id).map(m=>({...m,custody:Number(m.custody||0),daily_total:Number(m.daily_total||0)})),
         }));
@@ -9241,9 +9532,12 @@ function SurveyPublicPage({shortId}){
     setSubmitting(false);
   };
 
-  // Big styles container to make survey feel welcoming
-  var wrap={padding:"22px 18px 40px",minHeight:"100vh"};
+  var cust=mergeSurveyCust(project&&project.survey_customization);
+  var A=cust.accent_color||T.accent;
+  var pageBg=cust.bg_color||T.bg;
+  var wrap={padding:"22px 18px 40px",minHeight:"100vh",background:pageBg};
   var card={background:T.card,border:"1.5px solid "+T.border,borderRadius:16,padding:"16px 18px",marginBottom:14};
+  var answeredCount=(function(){ var n=0; for(var i=0;i<questions.length;i++){ var v=answers[questions[i].id]; if(v!==undefined&&v!==null&&v!==""&&!(Array.isArray(v)&&!v.length)) n++; } return n; })();
 
   if(loading){
     return <div style={wrap}><div style={{textAlign:"center",padding:60,color:T.muted}}>جارٍ التحميل…</div></div>;
@@ -9264,8 +9558,8 @@ function SurveyPublicPage({shortId}){
   if(done){
     return <div style={wrap}><div style={Object.assign({},card,{textAlign:"center",padding:36})}>
       <div style={{fontSize:56,marginBottom:12}}>🌟</div>
-      <div style={{fontSize:18,fontWeight:900,color:T.text,marginBottom:8}}>شكراً لك!</div>
-      <div style={{fontSize:13,color:T.muted,lineHeight:1.7}}>وصلتنا إجاباتك.<br/>رأيك يساعدنا نصنع تجارب أفضل.</div>
+      <div style={{fontSize:18,fontWeight:900,color:T.text,marginBottom:8}}>{cust.thank_you_title||"شكراً لك!"}</div>
+      <div style={{fontSize:13,color:T.muted,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{cust.thank_you_message||"وصلتنا إجاباتك.\nرأيك يساعدنا نصنع تجارب أفضل."}</div>
     </div></div>;
   }
 
@@ -9273,12 +9567,39 @@ function SurveyPublicPage({shortId}){
 
   return (
     <div style={wrap}>
+      {/* Hero image (optional) */}
+      {cust.hero_image_url&&(
+        <div style={{marginBottom:14,borderRadius:20,overflow:"hidden",border:"1px solid "+T.border}}>
+          <img src={cust.hero_image_url} alt="hero" style={{width:"100%",display:"block",maxHeight:200,objectFit:"cover"}}/>
+        </div>
+      )}
+
       {/* Header */}
-      <div style={{background:T.accent,color:"#fff",borderRadius:20,padding:"20px 20px",marginBottom:16}}>
+      <div style={{background:A,color:"#fff",borderRadius:20,padding:"20px 20px",marginBottom:16}}>
         <div style={{fontSize:11,letterSpacing:"0.2em",opacity:0.85,fontFamily:"'DM Mono',monospace",textTransform:"uppercase",marginBottom:6}}>Feedback</div>
         <div style={{fontSize:22,fontWeight:900,lineHeight:1.3}}>🎉 شاركنا رأيك</div>
         <div style={{fontSize:13,marginTop:6,opacity:0.9}}>{project.name}{cat?" · "+cat.e+" "+cat.l:""}</div>
       </div>
+
+      {/* Welcome message */}
+      {cust.welcome_message&&(
+        <div style={Object.assign({},card,{background:T.card2,fontSize:13,color:T.text,lineHeight:1.7,whiteSpace:"pre-wrap"})}>
+          {cust.welcome_message}
+        </div>
+      )}
+
+      {/* Progress bar */}
+      {cust.show_progress&&questions.length>0&&(
+        <div style={{marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace",marginBottom:6}}>
+            <span>{answeredCount} / {questions.length}</span>
+            <span>{Math.round(answeredCount*100/Math.max(questions.length,1))}%</span>
+          </div>
+          <div style={{height:6,background:T.card2,borderRadius:999,overflow:"hidden"}}>
+            <div style={{height:"100%",width:(answeredCount*100/Math.max(questions.length,1))+"%",background:A,transition:"width 0.3s"}}/>
+          </div>
+        </div>
+      )}
 
       {/* Questions */}
       {questions.map(function(q,idx){
@@ -9289,7 +9610,7 @@ function SurveyPublicPage({shortId}){
               {q.required&&<span style={{color:T.warn,marginRight:6}}>*</span>}
             </div>
             <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:14,lineHeight:1.5}}>{q.question}</div>
-            <QuestionInput q={q} value={answers[q.id]} onChange={function(v){setAns(q.id,v);}}/>
+            <QuestionInput q={q} value={answers[q.id]} onChange={function(v){setAns(q.id,v);}} cust={cust} accent={A}/>
           </div>
         );
       })}
@@ -9303,12 +9624,12 @@ function SurveyPublicPage({shortId}){
             var sel=identify===val;
             return (
               <div key={String(val)} className="press" onClick={function(){setIdentify(val);}}
-                style={{background:sel?T.accent+"18":T.card,border:"1.5px solid "+(sel?T.accent:T.border),borderRadius:12,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
-                <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(sel?T.accent:T.border),background:sel?T.accent:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                style={{background:sel?A+"18":T.card,border:"1.5px solid "+(sel?A:T.border),borderRadius:12,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(sel?A:T.border),background:sel?A:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
                   {sel&&<div style={{width:8,height:8,borderRadius:"50%",background:"#fff"}}/>}
                 </div>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:14,fontWeight:700,color:sel?T.accent:T.text}}>{lbl}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:sel?A:T.text}}>{lbl}</div>
                   <div style={{fontSize:11,color:T.muted,marginTop:2}}>{sub}</div>
                 </div>
               </div>
@@ -9335,26 +9656,35 @@ function SurveyPublicPage({shortId}){
 
       {errorMsg&&<div style={{background:T.warn+"22",border:"1px solid "+T.warn,borderRadius:11,padding:"10px 14px",marginBottom:12,color:T.warnText,fontSize:13,textAlign:"center"}}>{errorMsg}</div>}
 
-      <Btn full disabled={!canSubmit||submitting} onClick={doSubmit}>
-        {submitting?"…جارٍ الإرسال":"إرسال الرد"}
-      </Btn>
+      <button disabled={!canSubmit||submitting} onClick={doSubmit} className="press"
+        style={{width:"100%",background:(!canSubmit||submitting)?T.border:A,color:"#fff",border:"none",borderRadius:14,padding:"14px 20px",fontSize:15,fontWeight:800,cursor:(!canSubmit||submitting)?"default":"pointer",fontFamily:"Tajawal,sans-serif",opacity:(!canSubmit||submitting)?0.6:1}}>
+        {submitting?"…جارٍ الإرسال":(cust.submit_button_text||"إرسال الرد")}
+      </button>
 
       <div style={{textAlign:"center",marginTop:16,fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em"}}>m-way</div>
     </div>
   );
 }
 
-function QuestionInput({q,value,onChange}){
+function QuestionInput({q,value,onChange,cust,accent}){
   const T=useT();
+  var C=cust||DEFAULT_SURVEY_CUSTOMIZATION;
+  var A=accent||T.accent;
   if(q.q_type==="rating"){
+    var style=(RATING_ICON_STYLES.find(function(s){return s.id===C.rating_icon;}))||RATING_ICON_STYLES[0];
     return (
       <div style={{display:"flex",gap:6,justifyContent:"center",padding:"6px 0"}}>
         {[1,2,3,4,5].map(function(n){
           var active=(value||0)>=n;
+          var glyph, color, opacity=1;
+          if(style.id==="number"){ glyph=String(n); color=active?A:T.border; }
+          else if(style.id==="emoji"){ glyph=C.rating_emoji||"🔥"; opacity=active?1:0.28; color=""; }
+          else if(style.id==="thumb"){ glyph="👍"; opacity=active?1:0.28; color=""; }
+          else { glyph=active?style.filled:style.empty; color=active?(style.activeColor||A):T.border; }
           return (
             <button key={n} className="press" onClick={function(){onChange(n);}}
-              style={{background:"transparent",border:"none",cursor:"pointer",fontSize:34,padding:2,color:active?"#f5c518":T.border,transition:"color 0.15s"}}>
-              ★
+              style={{background:"transparent",border:"none",cursor:"pointer",fontSize:style.id==="number"?26:34,padding:2,color:color||undefined,opacity:opacity,transition:"color 0.15s,opacity 0.15s",fontWeight:style.id==="number"?900:400,minWidth:36}}>
+              {glyph}
             </button>
           );
         })}
@@ -9369,7 +9699,7 @@ function QuestionInput({q,value,onChange}){
             var sel=value===n;
             return (
               <button key={n} className="press" onClick={function(){onChange(n);}}
-                style={{background:sel?T.accent:T.card2,border:"1px solid "+(sel?T.accent:T.border),color:sel?"#fff":T.textS,borderRadius:8,padding:"9px 0",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>{n}</button>
+                style={{background:sel?A:T.card2,border:"1px solid "+(sel?A:T.border),color:sel?"#fff":T.textS,borderRadius:8,padding:"9px 0",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>{n}</button>
             );
           })}
         </div>
@@ -9380,14 +9710,18 @@ function QuestionInput({q,value,onChange}){
     );
   }
   if(q.q_type==="yes_no"){
+    var yn=(YES_NO_STYLES.find(function(s){return s.id===C.yes_no_style;}))||YES_NO_STYLES[0];
+    var yesLbl, noLbl;
+    if(yn.id==="custom"){ yesLbl=(C.yes_emoji||"👍")+" نعم"; noLbl=(C.no_emoji||"👎")+" لا"; }
+    else { yesLbl=yn.yes; noLbl=yn.no; }
     return (
       <div style={{display:"flex",gap:8}}>
-        {[["yes","👍 نعم"],["no","👎 لا"]].map(function(pair){
+        {[["yes",yesLbl],["no",noLbl]].map(function(pair){
           var v=pair[0], lbl=pair[1];
           var sel=value===v;
           return (
             <button key={v} className="press" onClick={function(){onChange(v);}}
-              style={{flex:1,background:sel?T.accent+"22":T.card2,border:"1.5px solid "+(sel?T.accent:T.border),color:sel?T.accent:T.text,borderRadius:12,padding:"14px 8px",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans','Tajawal',sans-serif"}}>{lbl}</button>
+              style={{flex:1,background:sel?A+"22":T.card2,border:"1.5px solid "+(sel?A:T.border),color:sel?A:T.text,borderRadius:12,padding:"14px 8px",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans','Tajawal',sans-serif"}}>{lbl}</button>
           );
         })}
       </div>
@@ -9401,8 +9735,8 @@ function QuestionInput({q,value,onChange}){
           var sel=value===opt;
           return (
             <button key={i} className="press" onClick={function(){onChange(opt);}}
-              style={{background:sel?T.accent+"18":T.card2,border:"1.5px solid "+(sel?T.accent:T.border),color:sel?T.accent:T.text,borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans','Tajawal',sans-serif",textAlign:"right",display:"flex",alignItems:"center",gap:10}}>
-              <div style={{width:18,height:18,borderRadius:"50%",border:"2px solid "+(sel?T.accent:T.border),background:sel?T.accent:"transparent",flexShrink:0}}/>
+              style={{background:sel?A+"18":T.card2,border:"1.5px solid "+(sel?A:T.border),color:sel?A:T.text,borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans','Tajawal',sans-serif",textAlign:"right",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:18,height:18,borderRadius:"50%",border:"2px solid "+(sel?A:T.border),background:sel?A:"transparent",flexShrink:0}}/>
               <span style={{flex:1}}>{opt}</span>
             </button>
           );
