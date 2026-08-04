@@ -729,6 +729,29 @@ function Badge({label,color,bg}) {
 
 function Modal({title,onClose,children,noPad=false}) {
   const T=useT();
+  const vp=useViewport();
+  // Desktop: centered card with dimmed backdrop
+  // Mobile: original bottom-sheet
+  if(vp.isDesktop){
+    return (
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:400,backdropFilter:"blur(4px)",
+        display:"flex",alignItems:"center",justifyContent:"center",padding:"32px 20px"}}
+        onClick={e=>e.target===e.currentTarget&&onClose()}>
+        <div style={{background:T.card,border:`1.5px solid ${T.border}`,borderRadius:18,width:"100%",maxWidth:560,maxHeight:"88vh",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.5)"}}>
+          {!noPad&&<div style={{padding:"20px 24px 24px"}}>
+            <Row style={{justifyContent:"space-between",marginBottom:18,alignItems:"center"}}>
+              <div style={{fontSize:17,fontWeight:800,color:T.text}}>{title}</div>
+              <Btn variant="ghost" sm onClick={onClose} style={{padding:"6px 8px",borderRadius:10}}>
+                <Ic d={I.x} s={16} c={T.textS}/>
+              </Btn>
+            </Row>
+            {children}
+          </div>}
+          {noPad&&children}
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{position:"fixed",inset:0,background:T.modalBg,zIndex:200,backdropFilter:"blur(6px)",
       display:"flex",flexDirection:"column",justifyContent:"flex-end",maxWidth:480,margin:"0 auto"}}
