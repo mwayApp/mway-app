@@ -8556,6 +8556,227 @@ function buildSurveyReportHTML(project,questions,responses,opts){
 }
 
 /* ══════════════════════════════════════
+   SURVEYS TAB — top-level view (desktop nav)
+   Logic:
+   - Templates section: reusable question sets (built-in + user custom stored in LS)
+   - All Surveys section: aggregate view of every project's survey with responses
+   - "+ New survey" CTA: create by picking a hosting project (or make one)
+══════════════════════════════════════ */
+const CUSTOM_TEMPLATES_KEY = "mway_custom_survey_templates";
+
+function loadCustomTemplates(){
+  try{ var raw=LS.get(CUSTOM_TEMPLATES_KEY); return Array.isArray(raw)?raw:[]; }catch(e){ return []; }
+}
+function saveCustomTemplates(list){
+  try{ LS.set(CUSTOM_TEMPLATES_KEY, list); }catch(e){}
+}
+
+function SurveysTab({projects, surveyQuestions, setSurveyQuestions, surveyResponses, audience, invitations, onOpenProject, showToast}){
+  const T = useT();
+  const [subTab, setSubTab] = useState("surveys"); // surveys | templates
+  const [showCreate, setShowCreate] = useState(false);
+
+  // Hosting-enabled projects — the only ones eligible for surveys
+  const hostingProjects = projects.filter(function(p){ return p.hostingEnabled; });
+
+  // Aggregate: each hosting project + its question count + response count + last activity
+  const surveyRows = hostingProjects.map(function(p){
+    var qs = surveyQuestions.filter(function(q){ return q.project_id === p.id; });
+    var rs = surveyResponses.filter(function(r){ return r.project_id === p.id; });
+    var invCount = invitations.filter(function(i){ return i.project_id === p.id; }).length;
+    var known = rs.filter(function(r){ return !r.is_anonymous; }).length;
+    var anon = rs.filter(function(r){ return r.is_anonymous; }).length;
+    var lastResp = rs.length ? rs.reduce(function(a,r){
+      var d = new Date(r.submitted_at || 0).getTime();
+      return d > a ? d : a;
+    }, 0) : 0;
+    return {
+      project: p,
+      questionCount: qs.length,
+      responseCount: rs.length,
+      knownCount: known,
+      anonCount: anon,
+      invitedCount: invCount,
+      responseRate: invCount ? Math.round(rs.length * 100 / invCount) : 0,
+      lastResponseAt: lastResp
+    };
+  }).sort(function(a,b){ return b.lastResponseAt - a.lastResponseAt; });
+
+  // Totals
+  const totalQuestions = surveyRows.reduce(function(s,r){ return s + r.questionCount; }, 0);
+  const totalResponses = surveyRows.reduce(function(s,r){ return s + r.responseCount; }, 0);
+  const activeSurveys = surveyRows.filter(function(r){ return r.questionCount > 0; }).length;
+
+  // Templates: built-in + custom
+  const [customTpls, setCustomTpls] = useState(loadCustomTemplates());
+  const builtinTpls = Object.entries(SURVEY_TEMPLATES).map(function(pair){
+    return { id: pair[0], name: pair[1].name, qs: pair[1].qs, builtin: true };
+  });
+  const allTpls = builtinTpls.concat(customTpls.map(function(t){ return Object.assign({}, t, {builtin: false}); }));
+
+  return (
+    <div className="page" style={{padding:"32px 32px 0"}}>
+      {/* Header */}
+      <Row style={{justifyContent:"space-between",marginBottom:24,alignItems:"flex-end"}}>
+        <div>
+          <div style={{fontSize:11,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.18em",textTransform:"uppercase",marginBottom:6}}>Surveys</div>
+          <div style={{fontSize:28,fontWeight:800,color:T.text}}>📊 الاستبيانات</div>
+          <div style={{fontSize:12,color:T.muted,marginTop:4}}>إدارة استبيانات المشاريع + قوالب أسئلة قابلة للاستخدام</div>
+        </div>
+        <Btn onClick={function(){ setShowCreate(true); }}><Ic d={I.plus} s={14}/> استبيان جديد</Btn>
+      </Row>
+
+      {/* Stat tiles */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:22}}>
+        {[
+          ["استبيانات نشطة", activeSurveys, T.accent, "📋"],
+          ["إجمالي الأسئلة", totalQuestions, T.text, "❓"],
+          ["إجمالي الردود", totalResponses, T.accent, "💬"],
+          ["قوالب متاحة", allTpls.length, T.text, "🧩"]
+        ].map(function(t){
+          return (
+            <div key={t[0]} style={{background:T.card,border:`1.5px solid ${T.border}`,borderRadius:14,padding:"14px 16px"}}>
+              <Row style={{justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontSize:11,color:T.muted,fontWeight:600}}>{t[0]}</span>
+                <span style={{fontSize:16}}>{t[3]}</span>
+              </Row>
+              <div style={{fontSize:26,fontWeight:900,color:t[2]}}>{t[1]}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Sub-tabs */}
+      <Row style={{gap:0,marginBottom:16,background:T.card2,borderRadius:12,padding:3,maxWidth:400}}>
+        {[["surveys","📊 كل الاستبيانات"],["templates","🧩 القوالب"]].map(function(pair){
+          var id=pair[0], lbl=pair[1];
+          return (
+            <button key={id} className="press" onClick={function(){ setSubTab(id); }}
+              style={{flex:1,padding:"9px 0",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"Tajawal,sans-serif",fontSize:13,fontWeight:700,background:subTab===id?T.card:"transparent",color:subTab===id?T.accent:T.muted}}>{lbl}</button>
+          );
+        })}
+      </Row>
+
+      {/* ═════ ALL SURVEYS VIEW ═════ */}
+      {subTab==="surveys" && (
+        hostingProjects.length===0
+          ? <Card style={{textAlign:"center",padding:48}}>
+              <div style={{fontSize:44,marginBottom:10}}>📊</div>
+              <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:6}}>لا يوجد استبيانات بعد</div>
+              <div style={{fontSize:12,color:T.muted,marginBottom:16}}>الاستبيانات تُنشأ داخل مشاريع الاستضافة. أنشئي مشروع استضافة أولاً.</div>
+              <Btn onClick={function(){ setShowCreate(true); }}>+ ابدئي استبيان جديد</Btn>
+            </Card>
+          : (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:12}}>
+              {surveyRows.map(function(row){
+                var p = row.project;
+                var isActive = row.questionCount > 0;
+                var lastAt = row.lastResponseAt ? new Date(row.lastResponseAt).toLocaleDateString("ar-SA",{year:"numeric",month:"short",day:"numeric"}) : "لا يوجد ردود";
+                return (
+                  <div key={p.id} className="press card-hover" onClick={function(){ onOpenProject(p.id); }}
+                    style={{background:T.card,border:`1.5px solid ${T.border}`,borderRadius:14,padding:"14px 16px",cursor:"pointer"}}>
+                    <Row style={{justifyContent:"space-between",marginBottom:8,alignItems:"flex-start"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                        <div style={{fontSize:11,color:T.muted}}>{p.producer||"—"}</div>
+                      </div>
+                      <span style={{fontSize:10,background:isActive?T.accent+"22":T.card2,color:isActive?T.accent:T.muted,padding:"3px 8px",borderRadius:6,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{isActive?"نشط":"لم يبدأ"}</span>
+                    </Row>
+                    <Row style={{gap:12,marginTop:10,flexWrap:"wrap"}}>
+                      <div>
+                        <div style={{fontSize:9,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",textTransform:"uppercase"}}>أسئلة</div>
+                        <div style={{fontSize:15,fontWeight:800,color:T.text}}>{row.questionCount}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",textTransform:"uppercase"}}>ردود</div>
+                        <div style={{fontSize:15,fontWeight:800,color:T.accent}}>{row.responseCount}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.14em",textTransform:"uppercase"}}>نسبة الرد</div>
+                        <div style={{fontSize:15,fontWeight:800,color:T.text}}>{row.responseRate}%</div>
+                      </div>
+                    </Row>
+                    <div style={{fontSize:10,color:T.muted,marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}`}}>آخر رد: {lastAt}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+      )}
+
+      {/* ═════ TEMPLATES VIEW ═════ */}
+      {subTab==="templates" && (
+        <div>
+          <div style={{fontSize:11,color:T.muted,marginBottom:12,padding:"10px 14px",background:T.accent+"11",border:`1px solid ${T.accent}33`,borderRadius:11}}>
+            💡 القوالب تجمع أسئلة جاهزة يمكن تطبيقها على أي مشروع استضافة بضغطة واحدة. القوالب المبنية داخل التطبيق ثابتة، والقوالب المخصصة تحفظ محلياً على جهازك.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
+            {allTpls.map(function(tpl){
+              return (
+                <div key={tpl.id} style={{background:T.card,border:`1.5px solid ${T.border}`,borderRadius:14,padding:"14px 16px"}}>
+                  <Row style={{justifyContent:"space-between",marginBottom:6,alignItems:"flex-start"}}>
+                    <div style={{fontSize:15,fontWeight:800,color:T.text}}>{tpl.name}</div>
+                    <span style={{fontSize:9,background:tpl.builtin?T.card2:T.accent+"22",color:tpl.builtin?T.muted:T.accent,padding:"2px 7px",borderRadius:5,fontWeight:700,fontFamily:"'DM Mono',monospace",letterSpacing:"0.12em",textTransform:"uppercase"}}>{tpl.builtin?"مدمج":"مخصص"}</span>
+                  </Row>
+                  <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
+                    {tpl.qs.length} {tpl.qs.length===1?"سؤال":"أسئلة"} · {tpl.qs.map(function(q){ var m=Q_TYPE_META[q.q_type]; return m?m.icon:""; }).join(" ")}
+                  </div>
+                  <div style={{marginTop:8,paddingTop:10,borderTop:`1px solid ${T.border}`}}>
+                    {tpl.qs.slice(0,3).map(function(q,i){
+                      return <div key={i} style={{fontSize:11,color:T.textS,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>• {q.question}</div>;
+                    })}
+                    {tpl.qs.length>3 && <div style={{fontSize:10,color:T.muted,marginTop:4}}>+ {tpl.qs.length-3} سؤال آخر</div>}
+                  </div>
+                  {!tpl.builtin && (
+                    <button className="press" onClick={function(){
+                      if(!confirm("حذف هذا القالب؟")) return;
+                      var next = customTpls.filter(function(t){ return t.id !== tpl.id; });
+                      setCustomTpls(next); saveCustomTemplates(next);
+                    }} style={{marginTop:10,background:"transparent",border:"none",color:T.muted,fontSize:11,cursor:"pointer",fontFamily:"Tajawal,sans-serif"}}>حذف القالب</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Create Survey Modal — pick a hosting project */}
+      {showCreate && (
+        <Modal title="✨ استبيان جديد" onClose={function(){ setShowCreate(false); }}>
+          <div style={{fontSize:12,color:T.muted,marginBottom:14,lineHeight:1.65}}>
+            الاستبيانات تُبنى داخل مشاريع الاستضافة. اختاري مشروعاً موجوداً لبناء استبيانه:
+          </div>
+          {hostingProjects.length === 0 ? (
+            <div style={{background:T.warn+"18",border:`1px solid ${T.warn}55`,borderRadius:10,padding:"14px 16px",fontSize:12,color:T.warnText,lineHeight:1.65}}>
+              لا يوجد مشاريع استضافة بعد. أنشئي مشروع جديد وفعّلي فيه "🎪 استضافة" أولاً، ثم ارجعي هنا.
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:400,overflowY:"auto"}}>
+              {hostingProjects.map(function(p){
+                var qCount = surveyQuestions.filter(function(q){ return q.project_id === p.id; }).length;
+                return (
+                  <div key={p.id} className="press card-hover" onClick={function(){ setShowCreate(false); onOpenProject(p.id); }}
+                    style={{background:T.card2,border:`1.5px solid ${T.border}`,borderRadius:11,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:2}}>{p.name}</div>
+                      <div style={{fontSize:11,color:T.muted}}>
+                        {qCount>0 ? qCount+" سؤال موجود · تعديل" : "بدون أسئلة · إنشاء جديد"}
+                      </div>
+                    </div>
+                    <Ic d={I.chevron} s={14} c={T.muted}/>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
    DIRECTOR APP ROOT
 ══════════════════════════════════════ */
 function DirectorApp({onLogout,onThemeChange}) {
@@ -8757,7 +8978,7 @@ function DirectorApp({onLogout,onThemeChange}) {
                 <div style={{fontSize:14,fontWeight:700,color:T.text}}>مجد القرشي 🌸</div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                {[["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["settings","الإعدادات",I.settings]].map(function(item){
+                {[["home","الرئيسية",I.home],["projects","المشاريع",I.list],["overview","الإجماليات",I.chart],["income","دخلي",I.wallet],["database","قاعدة البيانات",I.copy],["files","الملفات",I.log],["surveys","الاستبيانات",I.check],["settings","الإعدادات",I.settings]].map(function(item){
                   var id=item[0], lbl=item[1], icon=item[2];
                   var active=tab===id;
                   return (
@@ -8800,6 +9021,9 @@ function DirectorApp({onLogout,onThemeChange}) {
             {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
             {tab==="overview"&&<OverviewTab projects={projects}/>}
             {tab==="income"&&<IncomeTab projects={projects}/>}
+            {tab==="database"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"database"} requestedVendor={null} onClearRequested={()=>{}}/>}
+            {tab==="files"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"files"} requestedVendor={null} onClearRequested={()=>{}}/>}
+            {tab==="surveys"&&<SurveysTab projects={projects} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} audience={audience} invitations={invitations} onOpenProject={setOpenId} showToast={showToast}/>}
             {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
           </div>
           {/* Bottom nav — hidden on desktop */}
