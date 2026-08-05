@@ -131,6 +131,16 @@ const sb = {
   },
   async restoreSession(){
     const s=LS.get("dir_sess"); if(!s) return false;
+    // Guard: token must belong to the CURRENT Supabase project. A JWT signed by another
+    // project (e.g. after switching SB_URL) is silently rejected on every request and looks
+    // like "logged in, empty data". Decode ref claim and drop the session if it doesn't match.
+    try{
+      const currentRef=(SB_URL.match(/https:\/\/([^.]+)\.supabase\.co/)||[])[1]||"";
+      const tokenRef=JSON.parse(atob(s.at.split(".")[1])).ref;
+      if(currentRef&&tokenRef&&currentRef!==tokenRef){
+        LS.del("dir_sess"); LS.del("member_session"); return false;
+      }
+    }catch{ LS.del("dir_sess"); return false; }
     if(s.exp&&Date.now()<s.exp-60000){_authToken=s.at;return true;}
     return await this.refreshSession();
   },
