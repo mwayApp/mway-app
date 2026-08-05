@@ -308,7 +308,9 @@ const escapeNote = s => escapeHtml(normalizeBullets(s));
 
 /* Generate short project ID: first 3 chars of name + 6 random chars */
 const makeShortId = (name) => {
-  const prefix = (name||"P").replace(/\s+/g,"").slice(0,3).toUpperCase();
+  // Keep only ASCII letters/digits so the URL stays URL-safe. Falls back to "P" if empty.
+  var ascii = (name||"").replace(/[^A-Za-z0-9]/g,"");
+  const prefix = (ascii||"P").slice(0,3).toUpperCase();
   const rand = Math.random().toString(36).slice(2,8).toUpperCase();
   return `${prefix}-${rand}`;
 };
@@ -9781,16 +9783,19 @@ function App() {
   const [projectData,setProjectData]=useState(null);
   const [surveyShortId,setSurveyShortId]=useState(()=>{
     var h=window.location.hash||"";
-    var m=h.match(/^#\/s\/([A-Za-z0-9\-_]+)/);
-    return m?m[1]:null;
+    var m=h.match(/^#\/s\/(.+?)(?:[?#]|$)/);
+    if(!m) return null;
+    try{ return decodeURIComponent(m[1]); }catch(e){ return m[1]; }
   });
   const T=THEMES[themeId]||THEMES.mway_dark;
 
   useEffect(()=>{
     var onHash=()=>{
       var h=window.location.hash||"";
-      var m=h.match(/^#\/s\/([A-Za-z0-9\-_]+)/);
-      setSurveyShortId(m?m[1]:null);
+      var m=h.match(/^#\/s\/(.+?)(?:[?#]|$)/);
+      if(!m){ setSurveyShortId(null); return; }
+      var id; try{ id=decodeURIComponent(m[1]); }catch(e){ id=m[1]; }
+      setSurveyShortId(id);
     };
     window.addEventListener("hashchange",onHash);
     return ()=>window.removeEventListener("hashchange",onHash);
