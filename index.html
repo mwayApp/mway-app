@@ -8882,7 +8882,7 @@ function saveCustomTemplates(list){
   try{ LS.set(CUSTOM_TEMPLATES_KEY, list); }catch(e){}
 }
 
-function SurveysTab({projects, surveyQuestions, setSurveyQuestions, surveyResponses, audience, invitations, onOpenProject, showToast}){
+function SurveysTab({projects, surveyQuestions, setSurveyQuestions, surveyResponses, audience, invitations, onOpenProject, onEditSurvey=function(){}, showToast}){
   const T = useT();
   const [subTab, setSubTab] = useState("surveys"); // surveys | templates
   const [showCreate, setShowCreate] = useState(false);
@@ -8984,14 +8984,18 @@ function SurveysTab({projects, surveyQuestions, setSurveyQuestions, surveyRespon
                 var isActive = row.questionCount > 0;
                 var lastAt = row.lastResponseAt ? new Date(row.lastResponseAt).toLocaleDateString("ar-SA",{year:"numeric",month:"short",day:"numeric"}) : "لا يوجد ردود";
                 return (
-                  <div key={p.id} className="press card-hover" onClick={function(){ onOpenProject(p.id); }}
+                  <div key={p.id} className="press card-hover" onClick={function(){ onEditSurvey(p.id); }}
                     style={{background:T.card,border:`1.5px solid ${T.border}`,borderRadius:14,padding:"14px 16px",cursor:"pointer"}}>
                     <Row style={{justifyContent:"space-between",marginBottom:8,alignItems:"flex-start"}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
                         <div style={{fontSize:11,color:T.muted}}>{p.producer||"—"}</div>
                       </div>
-                      <span style={{fontSize:10,background:isActive?T.accent+"22":T.card2,color:isActive?T.accent:T.muted,padding:"3px 8px",borderRadius:6,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{isActive?"نشط":"لم يبدأ"}</span>
+                      <Row style={{gap:6,alignItems:"center"}}>
+                        <span style={{fontSize:10,background:isActive?T.accent+"22":T.card2,color:isActive?T.accent:T.muted,padding:"3px 8px",borderRadius:6,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{isActive?"نشط":"لم يبدأ"}</span>
+                        <button className="press" onClick={function(e){e.stopPropagation();onOpenProject(p.id);}} title="فتح صفحة المشروع"
+                          style={{background:"transparent",border:"1px solid "+T.border,borderRadius:6,padding:"3px 7px",fontSize:10,color:T.muted,cursor:"pointer"}}>📂</button>
+                      </Row>
                     </Row>
                     <Row style={{gap:12,marginTop:10,flexWrap:"wrap"}}>
                       <div>
@@ -9069,7 +9073,7 @@ function SurveysTab({projects, surveyQuestions, setSurveyQuestions, surveyRespon
               {hostingProjects.map(function(p){
                 var qCount = surveyQuestions.filter(function(q){ return q.project_id === p.id; }).length;
                 return (
-                  <div key={p.id} className="press card-hover" onClick={function(){ setShowCreate(false); onOpenProject(p.id); }}
+                  <div key={p.id} className="press card-hover" onClick={function(){ setShowCreate(false); onEditSurvey(p.id); }}
                     style={{background:T.card2,border:`1.5px solid ${T.border}`,borderRadius:11,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:2}}>{p.name}</div>
@@ -9105,6 +9109,7 @@ function DirectorApp({onLogout,onThemeChange}) {
   const [editInv,setEditInv]=useState(null);
   const [savedInvs,setSavedInvs]=useState([]);
   const [showQuote,setShowQuote]=useState(false);
+  const [surveyProjectId,setSurveyProjectId]=useState(null);
   const [editQuote,setEditQuote]=useState(null);
   const [savedQuotes,setSavedQuotes]=useState(loadQuotations);
   const [showNotif,setShowNotif]=useState(false);
@@ -9337,7 +9342,7 @@ function DirectorApp({onLogout,onThemeChange}) {
             {tab==="income"&&<IncomeTab projects={projects}/>}
             {tab==="database"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"database"} requestedVendor={null} onClearRequested={()=>{}}/>}
             {tab==="files"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"files"} requestedVendor={null} onClearRequested={()=>{}}/>}
-            {tab==="surveys"&&<SurveysTab projects={projects} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} audience={audience} invitations={invitations} onOpenProject={setOpenId} showToast={showToast}/>}
+            {tab==="surveys"&&<SurveysTab projects={projects} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} audience={audience} invitations={invitations} onOpenProject={setOpenId} onEditSurvey={setSurveyProjectId} showToast={showToast}/>}
             {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
           </div>
           {/* Bottom nav — hidden on desktop */}
@@ -9357,6 +9362,22 @@ function DirectorApp({onLogout,onThemeChange}) {
           </nav>
           {showNew&&<NewProjectModal onSave={addProject} onClose={()=>setShowNew(false)}/>}
           {showNewLead&&<QuickAddLeadModal onSave={addProject} onClose={()=>setShowNewLead(false)}/>}
+      {surveyProjectId&&(function(){
+        var proj=projects.find(function(p){return p.id===surveyProjectId;});
+        if(!proj) return null;
+        return (
+          <div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:202,overflowY:"auto",background:T.bg,padding:vp.isDesktop?"24px 40px":"18px 16px"}}>
+            <Row style={{justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div>
+                <div style={{fontSize:10,color:T.muted,fontFamily:"'DM Mono',monospace",letterSpacing:"0.16em",textTransform:"uppercase",marginBottom:4}}>Survey editor</div>
+                <div style={{fontSize:20,fontWeight:900,color:T.text}}>🎯 استبيان: {proj.name}</div>
+              </div>
+              <Btn variant="ghost" sm onClick={function(){setSurveyProjectId(null);}}>✕ إغلاق</Btn>
+            </Row>
+            <SurveyEditor project={proj} onUpdate={updateProject} audience={audience} invitations={invitations} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} setSurveyResponses={setSurveyResponses} showToast={showToast}/>
+          </div>
+        );
+      })()}
       {showQuote&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:201,overflowY:"auto"}}>
         <QuotationEditor quotation={editQuote} banks={banks} projects={projects}
           onSave={function(q,c){
