@@ -9862,7 +9862,7 @@ function App() {
   return (
     <TC.Provider value={T}>
       <style>{gStyles}</style>
-      <div style={{background:T.bg,minHeight:"100vh",maxWidth:vp.isDesktop?1200:(vp.isTablet?720:480),margin:"0 auto",fontFamily:"Tajawal,sans-serif",direction:"rtl"}}>
+      <div style={{background:surveyShortId?"transparent":T.bg,minHeight:"100vh",maxWidth:surveyShortId?"none":(vp.isDesktop?1200:(vp.isTablet?720:480)),margin:"0 auto",fontFamily:"Tajawal,sans-serif",direction:"rtl"}}>
         {surveyShortId&&<SurveyPublicPage shortId={surveyShortId}/>}
         {!surveyShortId&&!role&&<LoginScreen onDirector={()=>setRole("director")} onSuperAdmin={()=>setRole("superadmin")} onMember={handleMemberLogin} onProducer={(m,p)=>{setMemberData(m);setProjectData(p);setRole("producer");}}/>}
         {!surveyShortId&&role==="onboarding"&&memberData&&<MemberOnboarding member={memberData} onDone={m=>{ setMemberData(m); setRole(m.role==="producer"?"producer":"member"); }}/>}
