@@ -9213,7 +9213,7 @@ function DirectorApp({onLogout,onThemeChange}) {
       setProjects(ps=>[...ps,{...p,id:row?.id||p.id,status:initStage,stageHistory:initHistory}]);
       setShowNew(false); setShowNewLead(false); setOpenId(row?.id||p.id);
       showToast("تم إنشاء المشروع ✓");
-    }catch{showToast("خطأ في الحفظ","err");}
+    }catch(e){console.error("addProject FAIL:",e); showToast("خطأ: "+(e?.message||String(e)).slice(0,90),"err");}
     setSaving(false);
   };
 
