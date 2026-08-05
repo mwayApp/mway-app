@@ -9558,7 +9558,18 @@ function SurveyPublicPage({shortId}){
   var cust=mergeSurveyCust(project&&project.survey_customization);
   var A=cust.accent_color||T.accent;
   var pageBg=cust.bg_color||T.bg;
-  var wrap={padding:"22px 18px 40px",minHeight:"100vh",background:pageBg};
+  // Paint the outer html/body too, so the color extends past the survey card on desktop
+  useEffect(function(){
+    var prevBody=document.body.style.background;
+    var prevHtml=document.documentElement.style.background;
+    document.body.style.background=pageBg;
+    document.documentElement.style.background=pageBg;
+    return function(){
+      document.body.style.background=prevBody;
+      document.documentElement.style.background=prevHtml;
+    };
+  },[pageBg]);
+  var wrap={padding:"22px 18px 40px",minHeight:"100vh",background:pageBg,maxWidth:640,margin:"0 auto"};
   var card={background:T.card,border:"1.5px solid "+T.border,borderRadius:16,padding:"16px 18px",marginBottom:14};
   var answeredCount=(function(){ var n=0; for(var i=0;i<questions.length;i++){ var v=answers[questions[i].id]; if(v!==undefined&&v!==null&&v!==""&&!(Array.isArray(v)&&!v.length)) n++; } return n; })();
 
