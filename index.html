@@ -224,18 +224,35 @@ function openForPrint(html, docTitle){
     }
   }
 
-  // Render into an off-screen iframe by loading a blob URL through its src attribute.
-  // Both document.write into a fresh document AND writing into iframe.contentDocument
-  // race with the browser's parser and render raw source text in some browsers
-  // (Arc/Chrome). Loading via src=blob: is the ONLY reliable pattern — the browser
-  // parses the HTML as a normal navigation.
+  var blob = new Blob([wrapped], {type:"text/html;charset=utf-8"});
+  var blobUrl = URL.createObjectURL(blob);
+
+  // Detect mobile — iOS Safari refuses to call print() from a hidden iframe. Give
+  // mobile users a real page where they can use the OS-native Share → Print flow.
+  var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent||"")
+              || (navigator.maxTouchPoints>1 && /Mac/.test(navigator.platform||""));
+
+  if(isMobile){
+    // Navigate current tab to the blob so iOS/Android render it as a proper page.
+    // From there the user hits Share → Print → Save PDF (iOS) or the browser menu
+    // → Save/Share as PDF (Android). Keeps window.print() out of the equation on
+    // platforms where it's a black hole.
+    var win = window.open(blobUrl, "_blank");
+    if(!win){
+      // Popup blocked → replace current tab. Back button restores the app.
+      window.location.href = blobUrl;
+    }
+    // Don't revoke immediately — user needs the URL for the whole viewing session.
+    setTimeout(function(){ try{ URL.revokeObjectURL(blobUrl); }catch(e){} }, 5*60*1000);
+    return;
+  }
+
+  // Desktop: off-screen iframe + iframe.contentWindow.print() — most reliable.
   var oldFrame = document.getElementById("mway-print-frame");
   if(oldFrame){
     if(oldFrame.dataset.blobUrl) try{ URL.revokeObjectURL(oldFrame.dataset.blobUrl); }catch(e){}
     oldFrame.remove();
   }
-  var blob = new Blob([wrapped], {type:"text/html;charset=utf-8"});
-  var blobUrl = URL.createObjectURL(blob);
   var iframe = document.createElement("iframe");
   iframe.id = "mway-print-frame";
   iframe.dataset.blobUrl = blobUrl;
