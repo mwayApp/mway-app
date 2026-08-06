@@ -224,47 +224,50 @@ function openForPrint(html, docTitle){
     }
   }
 
-  // Render into an off-screen iframe on the current page, then print the iframe.
-  // Much more reliable than window.open + blob URL, which behaves differently across
-  // browsers (seen: Arc/Chrome rendering raw source text). Iframe printing is a
-  // stable pattern supported everywhere and doesn't need popup permission.
+  // Render into an off-screen iframe by loading a blob URL through its src attribute.
+  // Both document.write into a fresh document AND writing into iframe.contentDocument
+  // race with the browser's parser and render raw source text in some browsers
+  // (Arc/Chrome). Loading via src=blob: is the ONLY reliable pattern — the browser
+  // parses the HTML as a normal navigation.
   var oldFrame = document.getElementById("mway-print-frame");
-  if(oldFrame) oldFrame.remove();
+  if(oldFrame){
+    if(oldFrame.dataset.blobUrl) try{ URL.revokeObjectURL(oldFrame.dataset.blobUrl); }catch(e){}
+    oldFrame.remove();
+  }
+  var blob = new Blob([wrapped], {type:"text/html;charset=utf-8"});
+  var blobUrl = URL.createObjectURL(blob);
   var iframe = document.createElement("iframe");
   iframe.id = "mway-print-frame";
+  iframe.dataset.blobUrl = blobUrl;
   iframe.style.cssText = "position:fixed;left:-99999px;top:0;width:794px;height:1123px;border:0;visibility:hidden;";
-  document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(wrapped);
-  iframe.contentDocument.close();
 
   var doPrint = function(){
     try{
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
     }catch(e){ alert("فشل فتح نافذة الطباعة: "+(e.message||e)); }
-    // Keep the iframe for ~2 minutes so the print dialog can still access it,
-    // then clean up.
-    setTimeout(function(){ try{ iframe.remove(); }catch(e){} }, 120000);
+    setTimeout(function(){
+      try{ URL.revokeObjectURL(blobUrl); }catch(e){}
+      try{ iframe.remove(); }catch(e){}
+    }, 120000);
   };
 
-  // Wait for fonts + images inside the iframe before printing
-  var waitReady = function(){
+  iframe.onload = function(){
     var doc = iframe.contentDocument;
-    var win = iframe.contentWindow;
-    var imgs = Array.from(doc.images||[]);
+    var imgs = Array.from((doc&&doc.images)||[]);
     var imgPromise = imgs.length ? Promise.all(imgs.map(function(i){
       if(i.complete && i.naturalWidth>0) return Promise.resolve();
       return new Promise(function(r){ var d=false; var f=function(){if(!d){d=true;r();}}; i.onload=f; i.onerror=f; setTimeout(f,4000); });
     })) : Promise.resolve();
-    var fontPromise = (doc.fonts && doc.fonts.ready) ? doc.fonts.ready : Promise.resolve();
+    var fontPromise = (doc && doc.fonts && doc.fonts.ready) ? doc.fonts.ready : Promise.resolve();
     Promise.race([
       Promise.all([imgPromise, fontPromise]),
       new Promise(function(r){ setTimeout(r, 6000); })
-    ]).then(function(){ setTimeout(doPrint, 250); });
+    ]).then(function(){ setTimeout(doPrint, 300); });
   };
-  // Small delay so the iframe finishes parsing
-  setTimeout(waitReady, 200);
+
+  document.body.appendChild(iframe);
+  iframe.src = blobUrl;
 }
 
 /* ══════════════════════════════════════
