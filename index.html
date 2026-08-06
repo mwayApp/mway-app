@@ -248,14 +248,20 @@ function openForPrint(html, docTitle){
       wrapped = wrapped.replace(/<head([^>]*)>/i, '<head$1><title>' + docTitle.replace(/[<>&]/g, '') + '</title>');
     }
   }
-  var w = window.open("", "_blank");
+  // Use a blob URL — much more reliable than document.write into a blank window.
+  // document.write races with the browser's navigation state and often corrupts the
+  // page in Chrome/Arc (seen: raw source text rendered instead of the HTML).
+  var blob = new Blob([wrapped], {type:"text/html;charset=utf-8"});
+  var url = URL.createObjectURL(blob);
+  var w = window.open(url, "_blank");
   if(!w){
-    alert("المتصفح منع فتح نافذة الطباعة. فعّل السماح للنوافذ المنبثقة ثم أعد المحاولة.");
-    return;
+    // Popup blocker fallback: navigate current tab instead
+    if(confirm("المتصفح منع فتح تاب جديد. هل تريدين فتح المعاينة في هذا التاب؟ (تقدرين ترجعين بزر الرجوع)")){
+      window.location.href = url;
+    }
   }
-  w.document.open();
-  w.document.write(wrapped);
-  w.document.close();
+  // Revoke the blob after 60s so it doesn't leak memory
+  setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(e){} }, 60000);
 }
 
 /* ══════════════════════════════════════
