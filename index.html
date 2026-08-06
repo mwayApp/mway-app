@@ -1328,8 +1328,10 @@ function InvExport({inv,banks,total,onClose}) {
    QUOTATION SYSTEM — نظام التسعيرات
 ══════════════════════════════════════ */
 
-var Q_KEY = "artdmajd_quotations_v1";
+var Q_KEY = "artdmajd_quotations_v1";       // legacy local cache — kept for one-time migration
 var QT_KEY = "artdmajd_contact_v1";
+var Q_MIGRATED_KEY = "mway_quotations_migrated_v1";
+var INV_MIGRATED_KEY = "mway_invoices_migrated_v1";
 
 function loadContact() {
   try { return JSON.parse(localStorage.getItem(QT_KEY)) || {}; } catch { return {}; }
@@ -1337,12 +1339,77 @@ function loadContact() {
 function saveContact(c) {
   try { localStorage.setItem(QT_KEY, JSON.stringify(c)); } catch {}
 }
-function loadQuotations() {
+
+// Legacy local-only readers — kept ONLY for the first-open migration path.
+function loadQuotationsLocal() {
   try { return JSON.parse(localStorage.getItem(Q_KEY)) || []; } catch { return []; }
 }
-function saveQuotations(list) {
-  try { localStorage.setItem(Q_KEY, JSON.stringify(list)); } catch {}
+
+// Load from Supabase. On first successful load on this device, if the browser
+// still has quotations sitting in localStorage that aren't yet in the DB, push
+// them up so Majd's existing pre-migration data is preserved across devices.
+async function loadQuotationsRemote(){
+  var rows = await sb.get("quotations","?order=created_at.desc");
+  var remote = (rows||[]).map(function(r){
+    var q = r.data||{}; q.id = r.id; return q;
+  });
+  if(!localStorage.getItem(Q_MIGRATED_KEY)){
+    var localList = loadQuotationsLocal();
+    if(localList.length){
+      var remoteIds = new Set(remote.map(function(q){ return q.id; }));
+      var toUpload = localList.filter(function(q){ return q && q.id && !remoteIds.has(q.id); });
+      for(var i=0;i<toUpload.length;i++){
+        var q = toUpload[i];
+        try{
+          await sb.post("quotations",{
+            id: q.id,
+            data: q,
+            project_id: q.projectId || null,
+            title: q.title || null,
+          });
+          remote.unshift(q);
+        }catch(e){ console.error("quotation migration:", e.message); }
+      }
+    }
+    try{ localStorage.setItem(Q_MIGRATED_KEY, "1"); }catch(e){}
+  }
+  return remote;
 }
+
+async function saveQuotationRemote(q){
+  var payload = { data:q, project_id:q.projectId||null, title:q.title||null, updated_at:new Date().toISOString() };
+  // Upsert by id
+  try{
+    await sb.patch("quotations", q.id, payload);
+  }catch(e){
+    // Not found → insert
+    try{ await sb.post("quotations", Object.assign({id:q.id}, payload)); }
+    catch(e2){ throw e2; }
+  }
+}
+async function deleteQuotationRemote(id){
+  try{ await sb.del("quotations", id); }catch(e){ console.error("quotation delete:", e.message); }
+}
+
+// Same treatment for invoices (they had no persistence at all — pure useState).
+async function loadInvoicesRemote(){
+  var rows = await sb.get("saved_invoices","?order=created_at.desc");
+  return (rows||[]).map(function(r){
+    var inv = r.data||{}; inv.id = r.id; return inv;
+  });
+}
+async function saveInvoiceRemote(inv){
+  var payload = { data:inv, title:inv.title||null, updated_at:new Date().toISOString() };
+  try{ await sb.patch("saved_invoices", inv.id, payload); }
+  catch(e){ try{ await sb.post("saved_invoices", Object.assign({id:inv.id}, payload)); }catch(e2){ throw e2; } }
+}
+async function deleteInvoiceRemote(id){
+  try{ await sb.del("saved_invoices", id); }catch(e){ console.error("invoice delete:", e.message); }
+}
+
+// Legacy wrappers — kept so any lingering call sites don't crash. New code uses the *Remote versions above.
+function loadQuotations(){ return loadQuotationsLocal(); }
+function saveQuotations(list){ try{ localStorage.setItem(Q_KEY, JSON.stringify(list)); }catch(e){} }
 
 var qNewItem = function() { return {id:uid(), description:"", qty:"1", unitPrice:"", total:0}; };
 
@@ -9291,6 +9358,8 @@ function DirectorApp({onLogout,onThemeChange}) {
         sb.get("event_invitations","?order=invited_at").then(r=>setInvitations(r||[])).catch(()=>{});
         sb.get("survey_questions","?order=order_num.asc").then(r=>setSurveyQuestions(r||[])).catch(()=>{});
         sb.get("survey_responses","?order=submitted_at.desc").then(r=>setSurveyResponses(r||[])).catch(()=>{});
+        loadQuotationsRemote().then(function(qs){ setSavedQuotes(qs); }).catch(function(e){ console.error("quotes load:", e.message); });
+        loadInvoicesRemote().then(function(is){ setSavedInvs(is); }).catch(function(e){ console.error("invs load:", e.message); });
         // App message — latest only
         sb.get("app_message","?order=created_at.desc&limit=1").then(r=>{ if(r&&r[0]) setAppMessage(r[0]); }).catch(()=>{});
         // Unread app-message notification
@@ -9437,10 +9506,10 @@ function DirectorApp({onLogout,onThemeChange}) {
             {tab==="projects"&&<ProjectsTab projects={projects} onOpen={setOpenId} onNew={()=>setShowNew(true)} onNewLead={()=>setShowNewLead(true)} setEditInv={setEditInv} setShowInv={setShowInv}/>}
             {tab==="overview"&&<OverviewTab projects={projects}/>}
             {tab==="income"&&<IncomeTab projects={projects}/>}
-            {tab==="database"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"database"} requestedVendor={null} onClearRequested={()=>{}}/>}
-            {tab==="files"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"files"} requestedVendor={null} onClearRequested={()=>{}}/>}
+            {tab==="database"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>{setSavedInvs(prev=>prev.filter(i=>i.id!==id));deleteInvoiceRemote(id);}} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){return prev.filter(function(i){return i.id!==id;});});deleteQuotationRemote(id);}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"database"} requestedVendor={null} onClearRequested={()=>{}}/>}
+            {tab==="files"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>{setSavedInvs(prev=>prev.filter(i=>i.id!==id));deleteInvoiceRemote(id);}} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){return prev.filter(function(i){return i.id!==id;});});deleteQuotationRemote(id);}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{}} requestedSec={"files"} requestedVendor={null} onClearRequested={()=>{}}/>}
             {tab==="surveys"&&<SurveysTab projects={projects} surveyQuestions={surveyQuestions} setSurveyQuestions={setSurveyQuestions} surveyResponses={surveyResponses} audience={audience} invitations={invitations} onOpenProject={setOpenId} onEditSurvey={setSurveyProjectId} showToast={showToast}/>}
-            {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>setSavedInvs(prev=>prev.filter(i=>i.id!==id))} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){var n=prev.filter(function(i){return i.id!==id;});saveQuotations(n);return n;});}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
+            {tab==="settings"&&<SettingsTab themeId={dirThemeId} onTheme={handleTheme} profile={profile} onProfile={setProfile} banks={banks} onBanks={setBanks} projects={projects} onPin={setPin} onLogout={onLogout} savedInvs={savedInvs} onOpenInv={inv=>{setEditInv(inv);setShowInv(true);}} onDelInv={id=>{setSavedInvs(prev=>prev.filter(i=>i.id!==id));deleteInvoiceRemote(id);}} savedQuotes={savedQuotes} onOpenQuote={function(q){setEditQuote(q);setShowQuote(true);}} onDelQuote={function(id){setSavedQuotes(function(prev){return prev.filter(function(i){return i.id!==id;});});deleteQuotationRemote(id);}} vendors={vendors} setVendors={setVendors} customTags={customTags} setCustomTags={setCustomTags} audience={audience} setAudience={setAudience} invitations={invitations} customInterests={customInterests} setCustomInterests={setCustomInterests} customCities={customCities} setCustomCities={setCustomCities} appMessage={appMessage} appMessageUnread={appMessageUnread} onMarkAppMessageRead={()=>{setAppMessageUnread(false);sb.get("notifications","?type=eq.app_message_update&read=eq.false").then(rows=>{(rows||[]).forEach(n=>sb.patch("notifications",n.id,{read:true}).catch(()=>{}));}).catch(()=>{});}} requestedSec={requestedSec} requestedVendor={requestedVendor} onClearRequested={()=>{setRequestedSec(null);setRequestedVendor(null);}}/>}
           </div>
           {/* Bottom nav — hidden on desktop */}
           <nav style={{position:"fixed",bottom:0,left:0,right:0,background:T.navBg,backdropFilter:"blur(20px)",borderTop:`1.5px solid ${T.border}`,display:vp.isDesktop?"none":"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,10px)",maxWidth:480,margin:"0 auto"}}>
@@ -9478,7 +9547,8 @@ function DirectorApp({onLogout,onThemeChange}) {
       {showQuote&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:201,overflowY:"auto"}}>
         <QuotationEditor quotation={editQuote} banks={banks} projects={projects}
           onSave={function(q,c){
-            setSavedQuotes(function(prev){var n=prev.find(function(i){return i.id===q.id;})?prev.map(function(i){return i.id===q.id?q:i;}):[...prev,q];saveQuotations(n);return n;});
+            setSavedQuotes(function(prev){var n=prev.find(function(i){return i.id===q.id;})?prev.map(function(i){return i.id===q.id?q:i;}):[q,...prev];return n;});
+            saveQuotationRemote(q).catch(function(e){ showToast("خطأ في مزامنة التسعيرة: "+(e.message||e),"err"); });
             setEditQuote(q);
             // Auto-advance the linked project to "quoted" stage
             if(q.projectId){ autoAdvance(q.projectId,"quoted"); }
@@ -9488,7 +9558,7 @@ function DirectorApp({onLogout,onThemeChange}) {
           onCreateProject={function(q){setShowQuote(false);setEditQuote(null);var p={id:uid(),short_id:makeShortId(q.title||"quot"),name:q.title||"مشروع جديد",producer:"",budget:0,custody:0,myDaily:0,myDailyCalc:{},status:"talk",financeStatus:null,startDate:q.issueDate||today(),deliveryDate:"",expenses:[],teamMembers:[],createdAt:today()};addProject(p).then(function(){showToast("تم إنشاء المشروع ✓");setOpenId(p.id);}).catch(function(){showToast("خطأ في الحفظ","err");});}}
         />
       </div>}
-      {showInv&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:200,overflowY:"auto"}}><InvoicePage invoice={editInv} projects={projects} banks={banks} onSave={inv=>{setSavedInvs(prev=>{const n=prev.find(i=>i.id===inv.id)?prev.map(i=>i.id===inv.id?inv:i):[...prev,inv];return n;});setEditInv(inv);}} onClose={r=>{setShowInv(false);setEditInv(null);if(r&&r.action==="added"){
+      {showInv&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:200,overflowY:"auto"}}><InvoicePage invoice={editInv} projects={projects} banks={banks} onSave={inv=>{setSavedInvs(prev=>{const n=prev.find(i=>i.id===inv.id)?prev.map(i=>i.id===inv.id?inv:i):[inv,...prev];return n;});setEditInv(inv);saveInvoiceRemote(inv).catch(function(e){showToast("خطأ في مزامنة الفاتورة: "+(e.message||e),"err");});}} onClose={r=>{setShowInv(false);setEditInv(null);if(r&&r.action==="added"){
               showToast("تمت الاضافة");
               // أعد تحميل المشاريع من Supabase
               sb.get("expenses","?project_id=eq."+r.projId+"&order=created_at.desc").then(exps=>{
