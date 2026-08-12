@@ -1348,60 +1348,141 @@ function loadQuotationsLocal() {
 // Load from Supabase. On first successful load on this device, if the browser
 // still has quotations sitting in localStorage that aren't yet in the DB, push
 // them up so Majd's existing pre-migration data is preserved across devices.
+// ALWAYS retry uploading local-only quotations on every app load. The previous
+// Q_MIGRATED_KEY gate meant a partial migration (some upload failures, offline
+// mid-batch, etc.) permanently left rows stranded on one device.
 async function loadQuotationsRemote(){
-  var rows = await sb.get("quotations","?order=created_at.desc");
-  var remote = (rows||[]).map(function(r){
-    var q = r.data||{}; q.id = r.id; return q;
-  });
-  if(!localStorage.getItem(Q_MIGRATED_KEY)){
-    var localList = loadQuotationsLocal();
-    if(localList.length){
-      var remoteIds = new Set(remote.map(function(q){ return q.id; }));
-      var toUpload = localList.filter(function(q){ return q && q.id && !remoteIds.has(q.id); });
-      for(var i=0;i<toUpload.length;i++){
-        var q = toUpload[i];
-        try{
-          await sb.post("quotations",{
-            id: q.id,
-            data: q,
-            project_id: q.projectId || null,
-            title: q.title || null,
-          });
-          remote.unshift(q);
-        }catch(e){ console.error("quotation migration:", e.message); }
+  var localList = loadQuotationsLocal();
+  var remote = [];
+  try{
+    var rows = await sb.get("quotations","?order=created_at.desc");
+    remote = (rows||[]).map(function(r){ var q = r.data||{}; q.id = r.id; return q; });
+  }catch(e){
+    console.error("[m-way] quotations remote fetch failed — using local cache:", e.message);
+    return localList; // stay usable when offline
+  }
+  var remoteIds = new Set(remote.map(function(q){ return q.id; }));
+  var toUpload = localList.filter(function(q){ return q && q.id && !remoteIds.has(q.id); });
+  var uploaded = 0, failed = 0;
+  for(var i=0;i<toUpload.length;i++){
+    var q = toUpload[i];
+    try{
+      await sb.post("quotations", {
+        id: q.id,
+        data: q,
+        project_id: q.projectId || null,
+        title: q.title || null,
+      });
+      remote.unshift(q);
+      uploaded++;
+    }catch(e){
+      var msg = String(e.message||e);
+      // Duplicate → row already in DB, skip silently
+      if(msg.indexOf("duplicate")<0 && msg.indexOf("23505")<0){
+        failed++;
+        console.error("[m-way] quotation upload failed for", q.id, ":", msg);
       }
     }
-    try{ localStorage.setItem(Q_MIGRATED_KEY, "1"); }catch(e){}
   }
-  return remote;
+  if(uploaded) console.log("[m-way] synced "+uploaded+" quotation(s) from local → Supabase");
+  if(failed) console.warn("[m-way] "+failed+" quotation(s) failed to sync — will retry next load");
+  // Merge: remote is authoritative for IDs it has; keep any local-only rows we couldn't upload yet
+  var byId = new Map();
+  remote.forEach(function(q){ byId.set(q.id, q); });
+  localList.forEach(function(q){ if(q && q.id && !byId.has(q.id)) byId.set(q.id, q); });
+  var out = Array.from(byId.values());
+  out.sort(function(a,b){ return String(b.createdAt||"").localeCompare(String(a.createdAt||"")); });
+  // Mirror the merged list back to localStorage so it stays as an offline cache
+  try{ localStorage.setItem(Q_KEY, JSON.stringify(out)); }catch(e){}
+  return out;
 }
 
 async function saveQuotationRemote(q){
   var payload = { data:q, project_id:q.projectId||null, title:q.title||null, updated_at:new Date().toISOString() };
-  // Upsert by id
+  // Update existing row first
   try{
-    await sb.patch("quotations", q.id, payload);
+    var updated = await sb.patch("quotations", q.id, payload);
+    // sb.patch resolves to [] when no row matched → we need to INSERT
+    if(Array.isArray(updated) && updated.length>0) return updated;
+  }catch(e){/* fall through */}
+  // INSERT (row didn't exist)
+  try{
+    return await sb.post("quotations", Object.assign({id:q.id}, payload));
   }catch(e){
-    // Not found → insert
-    try{ await sb.post("quotations", Object.assign({id:q.id}, payload)); }
-    catch(e2){ throw e2; }
+    var msg = String(e.message||e);
+    // Concurrent insert → row exists now, PATCH it
+    if(msg.indexOf("duplicate")>=0 || msg.indexOf("23505")>=0){
+      return await sb.patch("quotations", q.id, payload);
+    }
+    throw e;
   }
 }
 async function deleteQuotationRemote(id){
   try{ await sb.del("quotations", id); }catch(e){ console.error("quotation delete:", e.message); }
 }
 
-// Same treatment for invoices (they had no persistence at all — pure useState).
+// Same treatment for invoices — mirror to localStorage as offline cache, retry on load.
+var INV_LOCAL_KEY = "mway_invoices_cache_v1";
+function loadInvoicesLocal(){
+  try{ return JSON.parse(localStorage.getItem(INV_LOCAL_KEY)) || []; }catch{ return []; }
+}
 async function loadInvoicesRemote(){
-  var rows = await sb.get("saved_invoices","?order=created_at.desc");
-  return (rows||[]).map(function(r){
-    var inv = r.data||{}; inv.id = r.id; return inv;
-  });
+  var localList = loadInvoicesLocal();
+  var remote = [];
+  try{
+    var rows = await sb.get("saved_invoices","?order=created_at.desc");
+    remote = (rows||[]).map(function(r){ var inv = r.data||{}; inv.id = r.id; return inv; });
+  }catch(e){
+    console.error("[m-way] invoices remote fetch failed — using local cache:", e.message);
+    return localList;
+  }
+  var remoteIds = new Set(remote.map(function(inv){ return inv.id; }));
+  var toUpload = localList.filter(function(inv){ return inv && inv.id && !remoteIds.has(inv.id); });
+  var uploaded = 0, failed = 0;
+  for(var i=0;i<toUpload.length;i++){
+    var inv = toUpload[i];
+    try{
+      await sb.post("saved_invoices", { id: inv.id, data: inv, title: inv.title || null });
+      remote.unshift(inv);
+      uploaded++;
+    }catch(e){
+      var msg = String(e.message||e);
+      if(msg.indexOf("duplicate")<0 && msg.indexOf("23505")<0){
+        failed++;
+        console.error("[m-way] invoice upload failed for", inv.id, ":", msg);
+      }
+    }
+  }
+  if(uploaded) console.log("[m-way] synced "+uploaded+" invoice(s) from local → Supabase");
+  var byId = new Map();
+  remote.forEach(function(inv){ byId.set(inv.id, inv); });
+  localList.forEach(function(inv){ if(inv && inv.id && !byId.has(inv.id)) byId.set(inv.id, inv); });
+  var out = Array.from(byId.values());
+  try{ localStorage.setItem(INV_LOCAL_KEY, JSON.stringify(out)); }catch(e){}
+  return out;
 }
 async function saveInvoiceRemote(inv){
+  // Mirror to local cache first (offline safety net)
+  try{
+    var cache = loadInvoicesLocal();
+    var idx = cache.findIndex(function(x){ return x.id===inv.id; });
+    if(idx>=0) cache[idx] = inv; else cache.unshift(inv);
+    localStorage.setItem(INV_LOCAL_KEY, JSON.stringify(cache));
+  }catch(e){}
   var payload = { data:inv, title:inv.title||null, updated_at:new Date().toISOString() };
-  try{ await sb.patch("saved_invoices", inv.id, payload); }
-  catch(e){ try{ await sb.post("saved_invoices", Object.assign({id:inv.id}, payload)); }catch(e2){ throw e2; } }
+  try{
+    var updated = await sb.patch("saved_invoices", inv.id, payload);
+    if(Array.isArray(updated) && updated.length>0) return updated;
+  }catch(e){/* fall through */}
+  try{
+    return await sb.post("saved_invoices", Object.assign({id:inv.id}, payload));
+  }catch(e){
+    var msg = String(e.message||e);
+    if(msg.indexOf("duplicate")>=0 || msg.indexOf("23505")>=0){
+      return await sb.patch("saved_invoices", inv.id, payload);
+    }
+    throw e;
+  }
 }
 async function deleteInvoiceRemote(id){
   try{ await sb.del("saved_invoices", id); }catch(e){ console.error("invoice delete:", e.message); }
@@ -9573,8 +9654,17 @@ function DirectorApp({onLogout,onThemeChange}) {
       {showQuote&&<div style={{position:"fixed",top:0,bottom:0,left:0,right:vp.isDesktop?240:0,zIndex:201,overflowY:"auto"}}>
         <QuotationEditor quotation={editQuote} banks={banks} projects={projects}
           onSave={function(q,c){
-            setSavedQuotes(function(prev){var n=prev.find(function(i){return i.id===q.id;})?prev.map(function(i){return i.id===q.id?q:i;}):[q,...prev];return n;});
-            saveQuotationRemote(q).catch(function(e){ showToast("خطأ في مزامنة التسعيرة: "+(e.message||e),"err"); });
+            setSavedQuotes(function(prev){
+              var n = prev.find(function(i){return i.id===q.id;})
+                ? prev.map(function(i){return i.id===q.id?q:i;})
+                : [q,...prev];
+              // Mirror to localStorage immediately as an offline safety net —
+              // if the Supabase POST/PATCH below fails or the network drops,
+              // the next load will retry the upload from local cache.
+              try{ localStorage.setItem(Q_KEY, JSON.stringify(n)); }catch(e){}
+              return n;
+            });
+            saveQuotationRemote(q).catch(function(e){ showToast("سيتم إعادة المزامنة تلقائياً — "+(e.message||e),"err"); });
             setEditQuote(q);
             // Auto-advance the linked project to "quoted" stage
             if(q.projectId){ autoAdvance(q.projectId,"quoted"); }
