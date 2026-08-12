@@ -9479,7 +9479,25 @@ function DirectorApp({onLogout,onThemeChange}) {
     const interval=setInterval(()=>{
       sb.get("notifications","?read=eq.false").then(r=>setUnreadCount(r.length)).catch(()=>{});
     },30000);
-    return ()=>clearInterval(interval);
+    // Silent background sync — quotations + invoices retry any stranded local rows
+    // and pull in changes made from other devices. Fires on: interval, tab focus,
+    // and network reconnect. No UI, no button, no user action.
+    var runBgSync = function(){
+      loadQuotationsRemote().then(function(qs){ setSavedQuotes(qs); }).catch(function(){});
+      loadInvoicesRemote().then(function(is){ setSavedInvs(is); }).catch(function(){});
+    };
+    const syncInterval = setInterval(runBgSync, 60000);
+    var onFocus = function(){ runBgSync(); };
+    var onOnline = function(){ runBgSync(); };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", function(){ if(!document.hidden) runBgSync(); });
+    return function(){
+      clearInterval(interval);
+      clearInterval(syncInterval);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+    };
   },[]);
 
   const addProject=async(p)=>{
